@@ -11,13 +11,11 @@ def get_interactions(M):
     return I
 
 
-# Initialize the types array with N particles
 def get_types(M, N_m):
+    """ Initialize the types array with N particles """
     types = np.repeat(np.arange(M), N_m)
     np.random.shuffle(types)
     return types
-
-
 
 @njit
 def get_neighbours(L, D):
