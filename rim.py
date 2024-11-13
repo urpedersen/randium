@@ -1,37 +1,27 @@
+from cProfile import label
+
 import numpy as np
 from numba import njit
 import matplotlib.pyplot as plt
 import time
 
-# Define model parameters
-L = 64                 # Lattice size in each dimension
-D = 2                  # Dimensionality of the lattice
-N = L ** D             # Total number of particles
-N_m = 4                # Number of particles of each type
-NUM_STEPS = 2_000_000     # Total number of Monte Carlo steps
-EQUILIBRATION_STEPS = 2_000_000  # Number of equilibration steps
-PRINT_STRIDE = 64     # Print energy every PRINT_STRIDE steps
+def get_interactions(M):
+    """ Initialize the interaction matrix I[M][M] with elements drawn from a standard normal distribution """
+    np.random.seed(int(time.time()))
+    I = np.random.normal(0, 1, size=(M, M))
+    I = (I + I.T) / 2  # Make the interaction matrix symmetric
+    return I
 
-# Ensure that N is divisible by N_m
-if N % N_m != 0:
-    raise ValueError("N_m does not divide N evenly. Please adjust N_m or L.")
 
-M = N // N_m           # Number of types
+def get_types(M, N_m):
+    """ Initialize the types array with N particles """
+    types = np.repeat(np.arange(M), N_m)
+    np.random.shuffle(types)
+    return types
 
-# Seed the random number generator for reproducibility
-np.random.seed(int(time.time()))
-
-# Initialize the interaction matrix I[M][M] with elements drawn from a standard normal distribution
-I = np.random.normal(0, 1, size=(M, M))
-I = (I + I.T) / 2  # Make the interaction matrix symmetric
-
-# Initialize the types array with N particles
-types = np.repeat(np.arange(M), N_m)
-np.random.shuffle(types)
-
-# Precompute the neighbor indices for each particle to speed up computations
 @njit
-def compute_neighbors(L, D):
+def get_neighbours(L, D):
+    """ Precomputed neighbors indices for each particle (to speed up computations) """
     N = L ** D
     neighbors = np.zeros((N, 2 * D), dtype=np.int32)
     for n in range(N):
@@ -52,7 +42,6 @@ def compute_neighbors(L, D):
                 neighbor_idx += 1
     return neighbors
 
-neighbors = compute_neighbors(L, D)
 
 # Function to calculate the total energy of the system
 @njit
@@ -67,19 +56,20 @@ def total_energy(types, I, neighbors):
                 E += I[type_n, type_neighbor]
     return E
 
+
 # Function to perform the Monte Carlo simulation
 @njit
-def monte_carlo_simulation(types, I, neighbors, beta, NUM_STEPS, EQUILIBRATION_STEPS, PRINT_STRIDE):
+def monte_carlo_simulation(I, types, neighbors, beta, num_steps, equilibration_steps, print_stride):
     N = types.size
     E = total_energy(types, I, neighbors)
     accepted_moves = 0
     attempted_moves = 0
 
-    num_records = (NUM_STEPS - EQUILIBRATION_STEPS) // PRINT_STRIDE
+    num_records = (num_steps - equilibration_steps) // print_stride
     energies = np.zeros(num_records)
     record_index = 0
 
-    for step in range(1, NUM_STEPS + 1):
+    for step in range(1, num_steps + 1):
         # Choose two random particles to swap
         n1 = np.random.randint(0, N)
         n2 = np.random.randint(0, N)
@@ -112,42 +102,84 @@ def monte_carlo_simulation(types, I, neighbors, beta, NUM_STEPS, EQUILIBRATION_S
             accepted_moves += 1
 
         # Record energy every PRINT_STRIDE steps after equilibration
-        if step >= EQUILIBRATION_STEPS and (step - EQUILIBRATION_STEPS) % PRINT_STRIDE == 0:
+        if step >= equilibration_steps and (step - equilibration_steps) % print_stride == 0:
             if record_index < num_records:
                 energies[record_index] = E
                 record_index += 1
 
-    # Calculate average energy after equilibration
-    if record_index > 0:
-        average_energy = np.mean(energies[:record_index])
-    else:
-        average_energy = E
+    return energies, float(accepted_moves/attempted_moves)
 
-    return average_energy
 
-# Range of beta values from 0 to 2 in steps of 0.2
-beta_values = np.arange(0.0, 2.1, 0.2)
-average_energies = []
+def run_betas(plot=True):
+    # Define model parameters
+    L = 16  # Lattice size in each dimension
+    d = 2  # Dimensionality of the lattice
+    N_m = 16  # Number of particles of each type
+    num_steps = 16_000_000  # Total number of Monte Carlo steps
+    equilibration_steps = 8_000_000  # Number of equilibration steps
+    energy_stride = 64  # Store energy every energy_stride steps
 
-# Run simulations for each beta value
-for beta in beta_values:
-    print(f"Running simulation for beta = {beta:.1f}")
-    # Reset types array for each beta
-    types = np.repeat(np.arange(M), N_m)
-    np.random.shuffle(types)
+    N = L ** d  # Total number of particles
 
-    # Run the simulation
-    avg_energy = monte_carlo_simulation(types, I, neighbors, beta, NUM_STEPS, EQUILIBRATION_STEPS, PRINT_STRIDE)
-    average_energies.append(avg_energy)
-    print(f"  Average Energy = {avg_energy}")
+    # Ensure that N is divisible by N_m
+    if N % N_m != 0:
+        raise ValueError("N_m does not divide N evenly. Please adjust N_m or L.")
 
-# Plot average energy versus beta
-plt.figure(figsize=(8, 6))
-plt.plot(beta_values, average_energies, marker='o')
-beta_max=2
-plt.plot([0, beta_max], [0, -1*N*beta_max], 'r--')
-plt.xlabel(r'Inverse temperature, $\beta$')
-plt.ylabel(r'Average Total Energy, $U$')
-plt.title(f'RIM: {D=}, {L=}, {N=}, {M=}')
-plt.grid(True)
-plt.show()
+    M = N // N_m  # Number of types
+
+    # Range of beta values from 0 to 2 in steps of 0.2
+    num_replicas = 8*32
+    betas = np.arange(0.0, 1.6, 0.2)
+    average_energies = []
+    sig_energies = []
+
+    # Run simulations for each beta value
+    neighbors = get_neighbours(L, d)
+    for beta in betas:
+        print(f"Running simulation for beta = {beta:.2f}")
+
+        # Reset arras for each beta
+        replica_energies = []
+        for replica in range(num_replicas):
+            I = get_interactions(M)
+            types = get_types(M, N_m)
+
+            # Run the simulation
+            energies, acc_ratio = monte_carlo_simulation(I, types, neighbors, beta, num_steps, equilibration_steps, energy_stride)
+            this_avg_energy = np.mean(energies)
+            replica_energies.append(this_avg_energy)
+            print(f"  Average Energy = {this_avg_energy}  (Acceptance ratio = {acc_ratio})")
+
+        average_energies.append(np.mean(replica_energies))
+        sig_energies.append(np.var(replica_energies)**0.5)
+
+    if plot:
+        # Plot energies of lowers temperature
+        times = np.arange(0, len(energies) * energy_stride, energy_stride)/N
+        plt.figure(figsize=(8, 6))
+        plt.plot(energies)
+        plt.title(f'RIM: {d=}, {L=}, {N=}, {M=} {beta=:0.2f}')
+        plt.xlabel('Measurement number')
+        plt.ylabel('Total Energy, $U$')
+        plt.grid(True)
+        plt.savefig(f'./figures/rim_enr_{d}_{L}_{N}_{N_m}_{beta:0.2f}.pdf', dpi=300, bbox_inches='tight')
+        plt.show()
+
+
+    # Plot average energy versus beta
+    if plot:
+        plt.figure(figsize=(8, 6))
+        plt.errorbar(betas, average_energies, sig_energies, marker='o', capsize=5)
+        beta_max = max(betas)
+        plt.plot([0, beta_max], [0, -1 * N * beta_max], 'r--', label='High temperature approx.')
+        plt.xlabel(r'Inverse temperature, $\beta$')
+        plt.ylabel(r'Average Total Energy, $U$')
+        plt.title(f'RIM: {d=}, {L=}, {N=}, {M=} {N_m=} {num_replicas=}')
+        plt.grid(True)
+        plt.legend(loc='lower left')
+        plt.savefig(f'./figures/rim_{d}_{L}_{N}_{N_m}.pdf', dpi=300, bbox_inches='tight')
+        plt.show()
+    return betas, average_energies
+
+if __name__ == "__main__":
+    run_betas()
