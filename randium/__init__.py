@@ -1,1 +1,1 @@
-from .interaction_matrix import get_interaction_matrix
+from .randium import monte_carlo_simulation
