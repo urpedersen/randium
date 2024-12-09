@@ -4,9 +4,9 @@ import randium as rd
 
 def run_betas(plot=True):
     # Define model parameters
-    L = 8  # Lattice size in each dimension
+    L = 128  # Lattice size in each dimension
     D = 2  # Dimensionality of the lattice
-    N_m = 8  # Number of particles of each type
+    N_m = 16  # Number of particles of each type
     num_steps = 16_000_000  # Total number of Monte Carlo steps
     equilibration_steps = 8_000_000  # Number of equilibration steps
     energy_stride = 64  # Store energy every energy_stride steps
@@ -22,7 +22,7 @@ def run_betas(plot=True):
     print(f'{M=}')
 
     # Range of beta values from 0 to 2 in steps of 0.2
-    num_replicas = 8
+    num_replicas = 32
     betas = np.arange(0.2, 1.6, 0.2)
     average_energies = []
     sig_energies = []
