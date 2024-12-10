@@ -111,6 +111,61 @@ def simulation_monte_carlo_global(I, types, neighbors, beta, num_steps, print_st
 
     return energies, float(accepted_moves/attempted_moves)
 
+@numba.njit
+def simulation_monte_carlo_local(I, types, neighbors, beta, num_steps, print_stride):
+    """ Monte Carlo simulation with particle swaps of neighbor particles """
+    num_records = num_steps // print_stride
+    energies = np.zeros(num_records)
+    record_index = 0
+
+    N = types.size
+    E = get_total_energy(types, I, neighbors)
+    accepted_moves = 0
+    attempted_moves = 0
+
+    for step in range(1, num_steps + 1):
+        # Choose a random particle
+        n = np.random.randint(0, N)
+
+        # Choose a random neighbor of the particle
+        neighbors_n = neighbors[n]
+        neighbor_idx = np.random.randint(0, len(neighbors_n))
+        n_neigh = neighbors_n[neighbor_idx]
+
+        type1 = types[n]
+        type2 = types[n_neigh]
+
+        # Calculate energy change due to swapping
+        dE = 0.0
+        for neighbor in neighbors[n]:
+            type_neighbor = types[neighbor]
+            if neighbor != n_neigh:
+                dE -= I[type1, type_neighbor]
+                dE += I[type2, type_neighbor]
+        for neighbor in neighbors[n_neigh]:
+            type_neighbor = types[neighbor]
+            if neighbor != n:
+                dE -= I[type2, type_neighbor]
+                dE += I[type1, type_neighbor]
+
+        attempted_moves += 1
+
+        # Metropolis criterion
+        if dE <= 0.0 or np.random.rand() < np.exp(-beta * dE):
+            # Accept the swap
+            types[n], types[n_neigh] = types[n_neigh], types[n]
+            E += dE
+            accepted_moves += 1
+
+        # Record energy every PRINT_STRIDE steps after equilibration
+        if step % print_stride == 0:
+            if record_index < num_records:
+                energies[record_index] = E
+                record_index += 1
+
+    return energies, float(accepted_moves / attempted_moves)
+    
+
 class Lattice:
     """ Lattice class. """
     def __init__(self, L, M, D, beta):
@@ -142,8 +197,32 @@ class Lattice:
     def get_total_energy(self):
         return get_total_energy(self.types, self.I, self.neighbors)
 
-    def simulation_monte_carlo_global(self, steps, print_stride):
+    def simulation_monte_carlo_global(self, steps, print_stride=None):
+        if print_stride is None:
+            print_stride = steps
         return simulation_monte_carlo_global(self.I, self.types, self.neighbors, self.beta, steps, print_stride)
+
+    def simulation_monte_carlo_local(self, steps, print_stride=None):
+        if print_stride is None:
+            print_stride = steps
+        return simulation_monte_carlo_local(self.I, self.types, self.neighbors, self.beta, steps, print_stride)
+
+    def to_png(self, filename='image.png'):
+        import matplotlib.pyplot as plt
+        arr = self.get_types_on_lattice()
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.imshow(arr, cmap='hsv')
+        ax.set_title(f'M={self.M}, N_M={self.N_m}, beta={self.beta:.2f}')
+        fig.savefig(filename, dpi=300)
+        plt.close(fig)
+
+def default_lattice():
+    L = 16  # 32
+    M = 64  # 128
+    D = 2
+    beta = 2.0
+    lat = Lattice(L, M, D, beta)
+    return lat
 
 def main():
     import matplotlib.pyplot as plt
@@ -152,9 +231,9 @@ def main():
     M = 64  # 128
     D = 2
     beta = 2.0
-    lat = Lattice(L, M, D, beta)
+    lat = default_lattice()
     print(f'{lat.D=} {lat.L=} {lat.N=} {lat.M=} {lat.N_m=} ')
-    _ = lat.simulation_monte_carlo_global(steps=4*lat.N, print_stride=4*lat.N)  # Equilibration
+    lat.simulation_monte_carlo_global(steps=4*lat.N, print_stride=4*lat.N)  # Equilibration
     print_stride = 4*lat.N
     steps = print_stride*1024
     plt.figure()
@@ -162,6 +241,22 @@ def main():
     for sim_idx in range(8):
         tic = time.perf_counter()
         energies, acceptance_rate = lat.simulation_monte_carlo_global(steps=steps, print_stride=print_stride)
+        toc = time.perf_counter()
+        # Plot energy trajectory
+        t = np.linspace(0, steps, steps//print_stride)/lat.N
+        plt.plot(t, energies, label=f'Time-block: {sim_idx}')
+        print(lat.get_types_on_lattice())
+        print(f'Total energy: {lat.get_total_energy()}')
+        print(f'Time elapsed: {toc - tic:0.4f} seconds, acceptance rate: {acceptance_rate:.4f}')
+    plt.legend()
+    plt.show()
+
+    # Test that local moves work
+    plt.figure()
+    plt.title(f'{lat.L}x{lat.L} lattice (N={lat.N}), M={lat.M} (N_M={lat.N_m}), beta={lat.beta:.2f}')
+    for sim_idx in range(8):
+        tic = time.perf_counter()
+        energies, acceptance_rate = lat.simulation_monte_carlo_local(steps=steps, print_stride=print_stride)
         toc = time.perf_counter()
         # Plot energy trajectory
         t = np.linspace(0, steps, steps//print_stride)/lat.N
