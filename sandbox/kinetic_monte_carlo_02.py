@@ -261,20 +261,31 @@ class Lattice:
 # -------------------------
 # Example usage
 # -------------------------
-if __name__ == "__main__":
-    L = 16
-    M = 2
+
+def main():
+    L = 64
+    M = 512
     D = 2
     beta = 2.0
-    min_time = 10.0  # run until simulation time reaches 10.0
+    min_time = 100.0  # run until simulation time reaches 10.0
 
-    lat = Lattice(L, M, D, beta)
-    start = time.perf_counter()
-    lat.run(min_time)
-    end = time.perf_counter()
+    print(f"Number of particles: {L ** D}")
+    print(f"Number of types: {M}")
+    print(f"Particles of each type: {L ** D // M}")
 
-    print(f"Simulation run until time {min_time} completed in {end - start:.4f} s")
-    print("Final time:", lat.current_time)
-    print("Final energy:", lat.E)
-    # Print a small sample of types
-    print("Sample of final types:", lat.types[:10])
+    for idx in range(4):
+        lat = Lattice(L, M, D, beta)
+        start = time.perf_counter()
+        lat.run(min_time)
+        end = time.perf_counter()
+
+        print(f"    {idx=}")
+        print(f"Simulation run until time {min_time} completed in {end - start:.4f} s")
+        print("Final time:", lat.current_time)
+        print("Final energy:", lat.E)
+        # Print a small sample of types
+        print("Sample of final types:", lat.types[:10])
+
+
+if __name__ == "__main__":
+    main()

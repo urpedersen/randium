@@ -1,36 +1,9 @@
-import time
-
 import numpy as np
-from scipy.special import erfinv
 import numba
 
-def get_interactions(M=5):
-    """ Create a symmetric interaction matrix """
-    I = np.zeros((M, M))
-
-    # Put infinity in the diagonal
-    # np.fill_diagonal(I, np.inf)
-    np.fill_diagonal(I, 100)
-
-    # Number if unique elements in the upper triangle of a symmetric matrix (minus diagonal)
-    N_M = M * (M + 1) // 2 - M
-
-    # Create values from standard normal distribution
-    k = np.arange(1, N_M + 1)
-    x_k = (2 * k - 1) / N_M - 1
-    y_k = np.sqrt(2) * erfinv(x_k)
-    y_k_shuffled = y_k.copy()
-    np.random.shuffle(y_k_shuffled)
-
-    # Fill elements into matrix
-    upper_indices = np.triu_indices(M, k=1)
-    I[upper_indices] = y_k_shuffled
-    I = I + I.T  # Make the matrix symmetric
-
-    return I
 
 def get_types(M, N_m):
-    """ Initialize the types array with N particles """
+    """ Initialize particle types. """
     types = np.repeat(np.arange(M), N_m)
     np.random.shuffle(types)
     return types
@@ -57,30 +30,46 @@ def get_neighbours(L, D):
                 neighbor_idx += 1
     return neighbors
 
+def get_interactions(M):
+    from scipy.special import erfinv
+    I = np.zeros((M, M))
+    np.fill_diagonal(I, np.inf)
+    N_M = M * (M + 1) // 2 - M
+    k = np.arange(1, N_M + 1)
+    x_k = (2 * k - 1) / N_M - 1
+    y_k = np.sqrt(2) * erfinv(x_k)
+    y_k_shuffled = y_k.copy()
+    np.random.shuffle(y_k_shuffled)
 
-# Function to calculate the total energy of the system
+    idx = 0
+    for i in range(M):
+        for j in range(i+1, M):
+            val = y_k_shuffled[idx]
+            I[i, j] = val
+            I[j, i] = val
+            idx += 1
+    return I
+
 @numba.njit
-def total_energy(types, I, neighbors):
+def get_total_energy(types, I, neighbors):
     E = 0.0
     N = types.size
     for n in range(N):
-        type_n = types[n]
-        for neighbor in neighbors[n]:
-            if neighbor > n:  # Avoid double counting
-                type_neighbor = types[neighbor]
-                E += I[type_n, type_neighbor]
+        t_n = types[n]
+        for neigh in neighbors[n]:
+            if neigh > n:
+                E += I[t_n, types[neigh]]
     return E
 
-
 @numba.njit
-def _monte_carlo_simulation(I, types, neighbors, beta, num_steps, equilibration_steps, print_stride):
-    """ Perform the Monte Carlo simulation with global particle swops """
+def simulation_monte_carlo_global(I, types, neighbors, beta, num_steps, print_stride):
+    """ Monte Carlo simulation with global particle swaps. """
     N = types.size
-    E = total_energy(types, I, neighbors)
+    E = get_total_energy(types, I, neighbors)
     accepted_moves = 0
     attempted_moves = 0
 
-    num_records = (num_steps - equilibration_steps) // print_stride
+    num_records = num_steps // print_stride
     energies = np.zeros(num_records)
     record_index = 0
 
@@ -97,15 +86,13 @@ def _monte_carlo_simulation(I, types, neighbors, beta, num_steps, equilibration_
         # Calculate energy change due to swapping
         dE = 0.0
         for neighbor in neighbors[n1]:
-            if neighbor != n2:
-                type_neighbor = types[neighbor]
-                dE -= I[type1, type_neighbor]
-                dE += I[type2, type_neighbor]
+            type_neighbor = types[neighbor]
+            dE -= I[type1, type_neighbor]
+            dE += I[type2, type_neighbor]
         for neighbor in neighbors[n2]:
-            if neighbor != n1:
-                type_neighbor = types[neighbor]
-                dE -= I[type2, type_neighbor]
-                dE += I[type1, type_neighbor]
+            type_neighbor = types[neighbor]
+            dE -= I[type2, type_neighbor]
+            dE += I[type1, type_neighbor]
 
         attempted_moves += 1
 
@@ -117,40 +104,73 @@ def _monte_carlo_simulation(I, types, neighbors, beta, num_steps, equilibration_
             accepted_moves += 1
 
         # Record energy every PRINT_STRIDE steps after equilibration
-        if step >= equilibration_steps and (step - equilibration_steps) % print_stride == 0:
+        if step% print_stride == 0:
             if record_index < num_records:
                 energies[record_index] = E
                 record_index += 1
 
-    return energies, float(accepted_moves / attempted_moves)
+    return energies, float(accepted_moves/attempted_moves)
 
-def monte_carlo_simulation(L, M, D, beta, num_steps, equilibration_steps, print_stride):
-    I = get_interactions(M)
-    N = L ** D
-    N_m = N // M
-    if N_m * M != N:
-        raise ValueError("N_m does not divide N evenly. Please adjust N_m or L.")
-    types = get_types(M, N_m)
-    neighbors = get_neighbours(L, D)
-    return _monte_carlo_simulation(I, types, neighbors, beta, num_steps, equilibration_steps, print_stride)
+class Lattice:
+    """ Lattice class. """
+    def __init__(self, L, M, D, beta):
+        self.L = L
+        self.M = M
+        self.D = D
+        self.beta = beta
+        
+        self.N = self.L ** self.D
+        self.N_m = self.N // self.M
+        if self.N_m * self.M != self.N:
+            raise ValueError("f{self.N_m * self.M=} != {self.N=}")
+        self.types = get_types(M, L ** D // M)
+        self.neighbors = get_neighbours(L, D)
+        self.I = get_interactions(M)
+        
+
+    def get_types_on_lattice(self):
+        """ Return array with types on the lattice, so the lattice configuration can be printed. """
+        if self.D != 2:
+            raise ValueError("Only 2D lattices are supported.")
+        array = np.zeros((self.L, self.L), dtype=np.uint32)
+        for n in range(self.N):
+            x = n // self.L
+            y = n % self.L
+            array[x, y] = self.types[n]
+        return array
+
+    def get_total_energy(self):
+        return get_total_energy(self.types, self.I, self.neighbors)
+
+    def simulation_monte_carlo_global(self, steps, print_stride):
+        return simulation_monte_carlo_global(self.I, self.types, self.neighbors, self.beta, steps, print_stride)
 
 def main():
-    tic = time.perf_counter()
-    monte_carlo_simulation(16, 2, 2, 2, 64, 16, 4)
-    toc = time.perf_counter()
-    print(f"Time elapsed: {toc - tic:0.4f} seconds for JIT compilation")
-    tic = time.perf_counter()
-    print(f"""{monte_carlo_simulation(
-        L=128,
-        M=128,
-        D=2,
-        beta=2,
-        num_steps=128_000,
-        equilibration_steps=64_000,
-        print_stride=8_000) = 
-    }""")
-    toc = time.perf_counter()
-    print(f"Time elapsed: {toc - tic:0.4f} seconds to run simulation")
+    import matplotlib.pyplot as plt
+    import time
+    L = 16  # 32
+    M = 64  # 128
+    D = 2
+    beta = 2.0
+    lat = Lattice(L, M, D, beta)
+    print(f'{lat.D=} {lat.L=} {lat.N=} {lat.M=} {lat.N_m=} ')
+    _ = lat.simulation_monte_carlo_global(steps=4*lat.N, print_stride=4*lat.N)  # Equilibration
+    print_stride = 4*lat.N
+    steps = print_stride*1024
+    plt.figure()
+    plt.title(f'{lat.L}x{lat.L} lattice (N={lat.N}), M={lat.M} (N_M={lat.N_m}), beta={lat.beta:.2f}')
+    for sim_idx in range(8):
+        tic = time.perf_counter()
+        energies, acceptance_rate = lat.simulation_monte_carlo_global(steps=steps, print_stride=print_stride)
+        toc = time.perf_counter()
+        # Plot energy trajectory
+        t = np.linspace(0, steps, steps//print_stride)/lat.N
+        plt.plot(t, energies, label=f'Time-block: {sim_idx}')
+        print(lat.get_types_on_lattice())
+        print(f'Total energy: {lat.get_total_energy()}')
+        print(f'Time elapsed: {toc - tic:0.4f} seconds, acceptance rate: {acceptance_rate:.4f}')
+    plt.legend()
+    plt.show()
 
 if __name__ == "__main__":
     main()
