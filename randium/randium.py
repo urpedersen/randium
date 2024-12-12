@@ -1,6 +1,6 @@
 import numpy as np
 import numba
-
+from copy import deepcopy
 
 def get_types(M, N_m):
     """ Initialize particle types. """
@@ -9,7 +9,7 @@ def get_types(M, N_m):
     return types
 
 def get_neighbours(L, D):
-    """ Precomputed neighbors indices for each particle (to speed up computations) """
+    """ Neighbors indices for each particle for a simple square lattice in D-dimentions """
     N = L ** D
     neighbors = np.zeros((N, 2 * D), dtype=np.int32)
     for n in range(N):
@@ -164,24 +164,25 @@ def simulation_monte_carlo_local(I, types, neighbors, beta, num_steps, print_str
                 record_index += 1
 
     return energies, float(accepted_moves / attempted_moves)
-    
 
 class Lattice:
     """ Lattice class. """
-    def __init__(self, L, M, D, beta):
-        self.L = L
-        self.M = M
-        self.D = D
-        self.beta = beta
+    def __init__(self, L: int, M: int, D: int, beta: float):
+        self.L: int = L
+        self.M: int = M
+        self.D: int = D
+        self.beta: float = beta
         
-        self.N = self.L ** self.D
-        self.N_m = self.N // self.M
+        self.N: int = self.L ** self.D
+        self.N_m: int = self.N // self.M
         if self.N_m * self.M != self.N:
             raise ValueError("f{self.N_m * self.M=} != {self.N=}")
         self.types = get_types(M, L ** D // M)
         self.neighbors = get_neighbours(L, D)
         self.I = get_interactions(M)
-        
+
+    def copy(self):
+        return deepcopy(self)
 
     def get_types_on_lattice(self):
         """ Return array with types on the lattice, so the lattice configuration can be printed. """
@@ -216,6 +217,21 @@ class Lattice:
         fig.savefig(filename, dpi=300)
         plt.close(fig)
 
+    def overlap(self, other):
+        """ Return overlap parameter between self and other lattice. """
+        if self.D != other.D or self.N != other.N or self.M != other.M:
+            raise ValueError('Error: Trying to compute overlap of lattices that are not the same kind')
+        overlap_counter = 0
+        overlaps = np.zeros(self.N, dtype=np.bool)
+        for n in range(self.N):
+            if self.types[n] == other.types[n]:
+                overlap_counter += 1
+                overlaps[n] = True
+        overlap_counter = overlap_counter / self.N
+        Q_max = 1.0
+        Q_min = 1/self.M
+        return (overlap_counter - Q_min) / (Q_max - Q_min), overlaps
+
 def default_lattice():
     L = 16  # 32
     M = 64  # 128
@@ -227,11 +243,12 @@ def default_lattice():
 def main():
     import matplotlib.pyplot as plt
     import time
-    L = 16  # 32
-    M = 64  # 128
-    D = 2
-    beta = 2.0
-    lat = default_lattice()
+    # lat = default_lattice()
+    lat = Lattice(
+        L=16,
+        M=32,
+        D=2,
+        beta=1.4)
     print(f'{lat.D=} {lat.L=} {lat.N=} {lat.M=} {lat.N_m=} ')
     lat.simulation_monte_carlo_global(steps=4*lat.N, print_stride=4*lat.N)  # Equilibration
     print_stride = 4*lat.N
@@ -252,11 +269,14 @@ def main():
     plt.show()
 
     # Test that local moves work
+    lat_ref = lat.copy()
+    overlap_timeseries = [lat.overlap(lat_ref)[0]]
     plt.figure()
     plt.title(f'{lat.L}x{lat.L} lattice (N={lat.N}), M={lat.M} (N_M={lat.N_m}), beta={lat.beta:.2f}')
-    for sim_idx in range(8):
+    for sim_idx in range(16):
         tic = time.perf_counter()
         energies, acceptance_rate = lat.simulation_monte_carlo_local(steps=steps, print_stride=print_stride)
+        overlap_timeseries.append(lat.overlap(lat_ref)[0])
         toc = time.perf_counter()
         # Plot energy trajectory
         t = np.linspace(0, steps, steps//print_stride)/lat.N
@@ -266,6 +286,24 @@ def main():
         print(f'Time elapsed: {toc - tic:0.4f} seconds, acceptance rate: {acceptance_rate:.4f}')
     plt.legend()
     plt.show()
+
+    plt.figure()
+    plt.title('overlaps')
+    plt.plot(overlap_timeseries, '--o')
+    plt.plot([0, len(overlap_timeseries)], [0,0],'k--')
+    plt.ylim(-0.2, 1)
+    plt.xlim(0, None)
+    plt.show()
+
+    plt.figure()
+    overlaps = lat.overlap(lat_ref)[1]
+    # Convert from Nx1 to a LxL array
+    overlaps.resize((lat.L, lat.L))
+    # make image where true is black and red is false
+    plt.imshow(overlaps, cmap='gray')
+    plt.show()
+
+    print(overlap_timeseries)
 
 if __name__ == "__main__":
     main()
