@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import randium as rd
 
+raise NotImplementedError("This script uses an old interface and needs tobe updated")
+
 def run_betas(plot=True):
     # Define model parameters
     L = 128  # Lattice size in each dimension
@@ -28,7 +30,6 @@ def run_betas(plot=True):
     sig_energies = []
 
     # Run simulations for each beta value
-    #neighbors = rd.get_neighbours(L, D)
     for beta in betas:
         print(f"Running simulation for beta = {beta:.2f}")
 
@@ -36,7 +37,9 @@ def run_betas(plot=True):
         replica_energies = []
         for replica in range(num_replicas):
             # Run the simulation
-            energies, acc_ratio = rd.monte_carlo_simulation(L, M, D, beta, num_steps, equilibration_steps, energy_stride)
+            lat = rd.Lattice(L, M, D, beta)
+            eq_steps = equilibration_steps*lat.N
+            #energies, acc_ratio = rd.monte_carlo_simulation(L, M, D, beta, num_steps, equilibration_steps, energy_stride)
             this_avg_energy = np.mean(energies)
             replica_energies.append(this_avg_energy)
             print(f"  Average Energy = {this_avg_energy}  (Acceptance ratio = {acc_ratio})")
