@@ -287,6 +287,7 @@ def main():
     plt.legend()
     plt.show()
 
+    # Plot overlap versus time
     plt.figure()
     plt.title('overlaps')
     plt.plot(overlap_timeseries, '--o')
@@ -295,11 +296,10 @@ def main():
     plt.xlim(0, None)
     plt.show()
 
+    # Plot overlap after a time-interval
     plt.figure()
     overlaps = lat.overlap(lat_ref)[1]
-    # Convert from Nx1 to a LxL array
     overlaps.resize((lat.L, lat.L))
-    # make image where true is black and red is false
     plt.imshow(overlaps, cmap='gray')
     plt.show()
 
