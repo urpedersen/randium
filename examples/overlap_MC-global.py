@@ -1,16 +1,17 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
 import randium as rd
 
 L = 64
 M = 512
-beta = 1.40
+beta = 1.46
 lat = rd.Lattice(L, M, D=2, beta=beta)
 print(f'{lat.N=} {lat.M=} {lat.N_m=} {lat.beta=}')
 
 ## Equilibrate system
-steps_eq = lat.N*1024*16
+steps_eq = lat.N*1024*2 # *1024*2
 lat.simulation_monte_carlo_global(steps_eq)
 
 steps = steps_eq
@@ -27,19 +28,22 @@ plt.ylabel('Total Energy, $U$')
 plt.show()
 
 # Compute overlap data
-timeblocks = 8
-times_in_timeblocks = np.logspace(1, 6, num=64, base=10)
+timeblocks = 32
+times_in_timeblocks = np.logspace(1, 5, num=64, base=10)
 overlap_data = []
+times = []
 for b in range(timeblocks):
     lat.simulation_monte_carlo_global(steps_eq)
     t_now = 0.0
     lat_ref = lat.copy()
     this_overlaps = []
     print(f'{b:<6}', end='', flush=True)
+    times = []
     for t_next in times_in_timeblocks:
         steps = int((t_next-t_now)*lat.N)
-        enr, acc = lat.simulation_monte_carlo_local(steps)
+        enr, acc = lat.simulation_monte_carlo_global(steps)
         t_now += steps/lat.N
+        times.append(t_now)
         Q, Q_arr = lat.overlap(lat_ref)
         this_overlaps.append(Q)
         print('.', end='', flush=True)
@@ -50,14 +54,14 @@ for b in range(timeblocks):
 overlap_data = np.array(overlap_data)
 overlap_mean = np.mean(overlap_data, axis=0)
 plt.figure()
-plt.plot(times_in_timeblocks, overlap_mean, 'o')
-plt.plot([min(times_in_timeblocks), max(times_in_timeblocks)], [0,0], 'k--')
+plt.plot(times, overlap_mean, 'o')
+plt.plot([min(times), max(times)], [0,0], 'k--')
 plt.xscale('log')
 plt.ylim(-0.1, 1)
 plt.show()
 
 # Save to CSV file
 pd.DataFrame({
-    'times': times_in_timeblocks,
+    'times': times,
     'overlap': overlap_mean,
-}).to_csv(f'data/overlap_{beta:.2f}_new.csv', index=False)
+}).to_csv(f'data/overlap_global_{beta:.2f}_new.csv', index=False)
