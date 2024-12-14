@@ -4,13 +4,13 @@ import pandas as pd
 import randium as rd
 
 L = 64
-M = 512
-beta = 1.40
+M = 512*8
+beta = 1.24
 lat = rd.Lattice(L, M, D=2, beta=beta)
 print(f'{lat.N=} {lat.M=} {lat.N_m=} {lat.beta=}')
 
 ## Equilibrate system
-steps_eq = lat.N*1024*16
+steps_eq = lat.N*2048
 lat.simulation_monte_carlo_global(steps_eq)
 
 steps = steps_eq
@@ -28,21 +28,23 @@ plt.show()
 
 # Compute overlap data
 timeblocks = 8
-times_in_timeblocks = np.logspace(1, 6, num=64, base=10)
+times_in_timeblocks = np.logspace(-0.5, 5, num=128, base=10)
 overlap_data = []
 for b in range(timeblocks):
-    lat.simulation_monte_carlo_global(steps_eq)
+    lat = rd.Lattice(L, M, D=2, beta=beta)
+    lat.simulation_monte_carlo_global(steps_eq*2)
     t_now = 0.0
     lat_ref = lat.copy()
     this_overlaps = []
     print(f'{b:<6}', end='', flush=True)
-    for t_next in times_in_timeblocks:
+    for idx, t_next in enumerate(times_in_timeblocks):
         steps = int((t_next-t_now)*lat.N)
         enr, acc = lat.simulation_monte_carlo_local(steps)
         t_now += steps/lat.N
         Q, Q_arr = lat.overlap(lat_ref)
         this_overlaps.append(Q)
-        print('.', end='', flush=True)
+        if idx%4==0:
+            print('.', end='', flush=True)
     print('')
     overlap_data.append(this_overlaps)
 
@@ -60,4 +62,4 @@ plt.show()
 pd.DataFrame({
     'times': times_in_timeblocks,
     'overlap': overlap_mean,
-}).to_csv(f'data/overlap_{beta:.2f}_new.csv', index=False)
+}).to_csv(f'data/overlap_{beta:.2f}_{lat.N_m}_new.csv', index=False)
