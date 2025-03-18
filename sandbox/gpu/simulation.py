@@ -130,7 +130,7 @@ def get_shuffle_idx(type0, type1, num_types):
 
 
 d_get_shuffle_idx = cuda.jit(device=True)(get_shuffle_idx)  # Device function
-h_get_shuffle_idx = numba.jit(get_shuffle_idx)  # Device function
+h_get_shuffle_idx = numba.jit(get_shuffle_idx)  # Host function
 
 
 def test_get_shuffle_idx():
