@@ -181,6 +181,9 @@ class Lattice:
         self.neighbors = get_neighbours(L, D)
         self.I = get_interactions(M)
 
+    def __str__(self):
+        return f"L = {self.L}, M = {self.M}, D = {self.D}, beta = {self.beta}"
+
     def copy(self):
         return deepcopy(self)
 
