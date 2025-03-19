@@ -2,7 +2,11 @@ import math
 import numpy as np
 import numba
 from numba import cuda
+
+from numba.cuda.random import create_xoroshiro128p_states
 from numba.cuda.random import xoroshiro128p_uniform_float32
+
+from numba.cuda.cudadrv.devicearray import DeviceNDArray
 
 
 def inverf(x: np.float32) -> np.float32:
@@ -147,7 +151,7 @@ def d_get_particle_energy(
     return energy
 
 
-cuda.jit(device=True)
+@cuda.jit(device=True)
 def d_update(
         lattice: np.ndarray[tuple[np.uint32, np.uint32]],
         num_types: np.uint32,
@@ -156,7 +160,7 @@ def d_update(
         c: np.uint32,
         beta: np.float32,
         tiles: tuple[np.uint32, np.uint32],
-        rng_states,
+        rng_states: DeviceNDArray,
         step: np.uint32,
         x: np.uint32,
         y: np.uint32
@@ -192,10 +196,11 @@ def d_update(
         delta = (energy0_new + energy1_new) - (energy0_old + energy1_old)
         rnd = xoroshiro128p_uniform_float32(rng_states, thread_id)
         if rnd < math.exp(-beta * delta):
-            ...  # Accept move
+            pass  # Accept move
         else:
             lattice[xx0, yy0] = this_type
             lattice[xx1, yy1] = that_type
+
 
 @cuda.jit
 def kernel_run_simulation(
@@ -206,17 +211,17 @@ def kernel_run_simulation(
         c: np.uint32,
         beta: np.float32,
         tiles: tuple[np.uint32, np.uint32],
-        rng_states,
+        rng_states: DeviceNDArray,
         steps: np.uint32
 ) -> None:
     """ GPU Kernel than run simulation.
     All sites in tile is attempted to swapped left, right, up and down """
     x, y = cuda.grid(2)
     grid = cuda.cg.this_grid()
-    tile_size = tiles[0]*tiles[1]
+    tile_size = tiles[0] * tiles[1]
 
-    for _ in np.arange(steps, dtype=np.uint32):
-        for tile_step in np.arange(tile_size, dtype=np.uint32):
+    for _ in range(steps):
+        for tile_step in range(tile_size):
             d_update(lattice, num_types, a, b, c, beta, tiles, rng_states, tile_step, x, y)
             grid.sync()
 
@@ -225,6 +230,9 @@ def kernel_run_simulation(
 def h_get_lattice_energy(
         lattice: np.ndarray[tuple[np.uint32, np.uint32]],
         num_types: np.uint32,
+        a: np.uint32,
+        b: np.uint32,
+        c: np.uint32
 ) -> np.float32:
     """ Host function. Return energy of the lattice. """
     rows, columns = lattice.shape
@@ -235,5 +243,36 @@ def h_get_lattice_energy(
             this_type = lattice[row, col]
             for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
                 that_type = lattice[(row + dx) % rows, (col + dy) % columns]
-                energy += 0.5 * h_get_pair_energy(this_type, that_type, M)
+                energy += 0.5 * h_get_pair_energy(this_type, that_type, M, a, b, c)
     return energy / lattice.size
+
+
+def main():
+    threads_per_block = (8, 8)
+    blocks = (16, 16)
+    tiles = (8, 8)
+
+    rows = tiles[0] * blocks[0] * threads_per_block[0]
+    cols = tiles[1] * blocks[1] * threads_per_block[1]
+    N = rows * cols
+
+    num_of_each_type = 1024 // 16
+    num_types = N // num_of_each_type
+
+    # Setup Lattice
+    lattice = np.array([[t] * num_of_each_type for t in range(num_types)], dtype=np.int32).flatten()
+    np.random.shuffle(lattice)
+    lattice = lattice.reshape((rows, cols))
+    d_lattice = cuda.to_device(lattice)
+
+    tile_size = tiles[0] * tiles[1]
+    n_threads = N // tile_size
+    rng_states = create_xoroshiro128p_states(n_threads, seed=2025)
+
+    a, b, c = 7, 0, 8
+
+    kernel_run_simulation[blocks, threads_per_block](d_lattice, num_types, a, b, c, 1.0, tiles, rng_states, 10)
+
+
+if __name__ == "__main__":
+    main()

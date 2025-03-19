@@ -1,1 +1,1 @@
-from .backend import kernel_run_simulation
+from .randium import Randium

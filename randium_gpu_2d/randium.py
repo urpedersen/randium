@@ -1,17 +1,20 @@
 import math
 
 import numpy as np
+import numba.cuda
 from numba.cuda.random import create_xoroshiro128p_states
 
+from backend import *
 
 class Randium:
     def __init__(
             self,
-            threads_per_block = (8, 8),
-            blocks = (16, 16),
-            tiles = (8, 8),
-            num_of_each_type = 64,
-            abc = (11, 0, 8),
+            threads_per_block=(8, 8),
+            blocks=(16, 16),
+            tiles=(8, 8),
+            num_of_each_type=64,
+            abc=(11, 0, 8),
+            seed=2025
     ):
         self.threads_per_block = np.uint32(threads_per_block[0]), np.uint32(threads_per_block[1])
         self.blocks = np.uint32(blocks[0]), np.uint32(blocks[1])
@@ -28,6 +31,8 @@ class Randium:
         self.b = np.uint32(abc[1])
         self.c = np.uint32(abc[2])
         self.abc = self.a, self.b, self.c
+        self.Mabc = self.num_types, self.a, self.b, self.c
+        self.seed = seed
 
         # Check if interaction matrix can be computed correctly
         self.N_M = int(self.M) * (int(self.M) - 1) // 2
@@ -36,7 +41,7 @@ class Randium:
             raise ValueError("The gcd(N_M, a) is not 1.")
 
         # Check for possible overflow of np.int32
-        test_0 = int(self.a)*(self.N_M-1)+int(self.b)
+        test_0 = int(self.a) * (self.N_M - 1) + int(self.b)
         test_1 = test_0 % int(self.N_M)
         max_value = np.iinfo(np.int32).max
         if test_0 > max_value:
@@ -49,6 +54,16 @@ class Randium:
         self.lattice = np.array([[t] * num_of_each_type for t in range(self.num_types)], dtype=np.int32).flatten()
         np.random.shuffle(self.lattice)
         self.lattice = self.lattice.reshape((self.rows, self.cols))
+        self.d_lattice = numba.cuda.to_device(self.lattice)
+
+        # Setup random number generator
+        tile_size = self.tiles[0] * self.tiles[1]
+        n_threads = self.N // tile_size
+        self.rng_states = create_xoroshiro128p_states(int(n_threads), seed=2025)
+
+        # Data collected during run executions
+        self.steps = []
+        self.wallclock_times = []
 
 
     def __repr__(self):
@@ -67,21 +82,43 @@ class Randium:
         out += f'  Unique type pairs: {int(self.N_M)}'
         return out
 
-    def run(self, steps=1):
-        from backend import kernel_run_simulation
+    def run(self, beta=1.0, steps=1):
+        start = cuda.event()
+        end = cuda.event()
 
-        # Setup random number generator
-        tile_size = self.tiles[0] * self.tiles[1]
-        n_threads = self.N // tile_size
+        start.record()
+        kernel_run_simulation[self.blocks, self.threads_per_block](
+            self.d_lattice,
+            *self.Mabc,
+            beta,
+            self.tiles,
+            self.rng_states,
+            steps
+        )
+        end.record()
+        end.synchronize()
+        self.lattice = self.d_lattice.copy_to_host()
 
+        wallclock_time = start.elapsed_time(end)
+        self.wallclock_times.append(wallclock_time)
+        self.steps.append(steps)
+
+        return wallclock_time
 
 
 def main():
     randium = Randium()
     print(randium)
     print(randium.lattice)
+    print(f'Compile in {randium.run(1)} ms')
+    wcs = []
+    for _ in range(16):
+        randium.run(beta = 1.0, steps = 64)
+    print(randium.lattice)
 
-    randium.run()
+
 
 if __name__ == '__main__':
     main()
+
+
