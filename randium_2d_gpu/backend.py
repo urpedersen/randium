@@ -47,18 +47,18 @@ def get_shuffle_idx(
     Note: Ensure that gcd(a, N_M) = 1 where N_M = M * (M - 1) // 2 and M is num_types.
      """
     if type0 == type1:  # Handle special diagonal
-        return np.nan
+        return np.uint32(np.nan)
 
     # Parameters, N.B. be aware of integer overflow (see error by making 'a' large)
-    M = np.uint32(num_types)
+    M = np.uint64(num_types)
 
-    i = min(type0, type1)  # j > i
-    j = max(type0, type1)
-    idx = i * (M - 1) - i * (i - 1) // 2 + (j - i - 1)  # Index in Strictly Upper Triangular Matrix
-    N_M = M * (M - 1) // 2  # Number of unique indexes
+    i = np.uint64(min(type0, type1))  # j > i
+    j = np.uint64(max(type0, type1))
+    idx = np.uint64(i * (M - 1) - i * (i - 1) // 2 + (j - i - 1))  # Index in Strictly Upper Triangular Matrix
+    N_M = np.uint64(M * (M - 1) // 2)  # Number of unique indexes
     for _ in range(c):
-        idx = (a * idx + b) % N_M  # Shuffle index
-    return idx
+        idx = np.uint64((a * idx + b) % N_M)  # Shuffle index
+    return np.uint32(idx)
 
 
 h_get_shuffle_idx = numba.jit(get_shuffle_idx)  # Host function
@@ -269,10 +269,12 @@ def main():
     n_threads = N // tile_size
     rng_states = create_xoroshiro128p_states(n_threads, seed=2025)
 
-    a, b, c = 7, 0, 8
+    a, b, c = 1664525, 1013904223, 4 # 7, 0, 8
 
     kernel_run_simulation[blocks, threads_per_block](d_lattice, num_types, a, b, c, 1.0, tiles, rng_states, 10)
 
 
 if __name__ == "__main__":
     main()
+
+

@@ -6,14 +6,14 @@ from numba.cuda.random import create_xoroshiro128p_states
 
 from backend import *
 
-class Randium:
+class Randium_2d_gpu:
     def __init__(
             self,
             threads_per_block=(8, 8),
             blocks=(16, 16),
             tiles=(8, 8),
             num_of_each_type=64,
-            abc=(11, 0, 8),
+            abc=(1664525, 1013904223, 4),
             seed=2025
     ):
         self.threads_per_block = np.uint32(threads_per_block[0]), np.uint32(threads_per_block[1])
@@ -43,12 +43,12 @@ class Randium:
         # Check for possible overflow of np.int32
         test_0 = int(self.a) * (self.N_M - 1) + int(self.b)
         test_1 = test_0 % int(self.N_M)
-        max_value = np.iinfo(np.int32).max
+        max_value = np.iinfo(np.uint64).max
         if test_0 > max_value:
-            print(f'Warning: {np.iinfo(np.int32).max = }, {test_0 = }, {test_1 = }')
+            print(f'Warning: {np.iinfo(np.int64).max = }, {test_0 = }, {test_1 = }')
             raise OverflowError("Try to change abc to avoid overflow")
-        converted_test_0 = np.int32(test_0)  # Also raise error
-        converted_test_1 = np.int32(test_1)
+        converted_test_0 = np.uint64(test_0)  # Also raise error
+        converted_test_1 = np.uint64(test_1)
 
         # Setup Lattice
         self.lattice = np.array([[t] * num_of_each_type for t in range(self.num_types)], dtype=np.int32).flatten()
@@ -105,20 +105,35 @@ class Randium:
 
         return wallclock_time
 
+    def get_benchmark(self):
+        first_delta_t = self.wallclock_times[0]
+        delta_t_avg = np.mean(self.wallclock_times[1:])
+        mc_attempts_per_step = self.rows * self.cols * 4
+        steps_avg = np.mean(self.steps[1:])
+        return dict(
+            first_delta_t = float(first_delta_t),
+            delta_t_avg = float(delta_t_avg),
+            mc_attempts_per_step = int(mc_attempts_per_step),
+            steps_avg = int(steps_avg),
+            mc_attempts_per_sec = float(steps_avg*mc_attempts_per_step/delta_t_avg),
+        )
+
+
 
 def main():
-    randium = Randium()
+    randium = Randium_2d_gpu()
     print(randium)
     print(randium.lattice)
     print(f'Compile in {randium.run(1)} ms')
-    wcs = []
-    for _ in range(16):
-        randium.run(beta = 1.0, steps = 64)
+    steps_per_time_block = 16
+    for time_block in range(16):
+        wc = randium.run(beta = 1.0, steps = steps_per_time_block)
+        print(f'{time_block:<4} {wc:2.2f}')
     print(randium.lattice)
-
+    from pprint import pprint
+    pprint(randium.get_benchmark())
+    print(f'MC attempts per secound: {randium.get_benchmark()['mc_attempts_per_sec']:0.2e}')
 
 
 if __name__ == '__main__':
     main()
-
-
