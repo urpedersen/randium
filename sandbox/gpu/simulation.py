@@ -172,7 +172,7 @@ def h_get_pair_energy(type0, type1, num_types):
     idx_shuffle = h_get_shuffle_idx(type0, type1, num_types)
     N_M = M * (M - 1) // 2
     x_k = (2 * idx_shuffle + 1) / N_M - 1  # -1 < x_k < +1
-    energy = h_inverf(x_k)
+    energy = np.sqrt(2.0)*h_inverf(x_k)
     return energy
 
 

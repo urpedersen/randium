@@ -1,10 +1,11 @@
 import math
+from itertools import product
 
 import numpy as np
 import numba.cuda
 from numba.cuda.random import create_xoroshiro128p_states
 
-from backend import *
+from . import backend
 
 class Randium_2d_gpu:
     def __init__(
@@ -13,7 +14,6 @@ class Randium_2d_gpu:
             blocks=(16, 16),
             tiles=(8, 8),
             num_of_each_type=64,
-            abc=(1664525, 1013904223, 4),
             seed=2025
     ):
         self.threads_per_block = np.uint32(threads_per_block[0]), np.uint32(threads_per_block[1])
@@ -21,34 +21,18 @@ class Randium_2d_gpu:
         self.tiles = np.uint32(tiles[0]), np.uint32(tiles[1])
         self.rows = tiles[0] * blocks[0] * threads_per_block[0]
         self.cols = tiles[1] * blocks[1] * threads_per_block[1]
-        self.N = np.uint32(self.rows * self.cols)
+        self.N = self.rows * self.cols
         self.num_of_each_type = self.N_m = np.uint32(num_of_each_type)
         self.num_types = self.M = np.uint32(self.N // self.num_of_each_type)
+        self.N_M = self.M * (self.M - 1) // 2
+        # 5**2 * 139 * 479 = 1664525
+        if math.gcd(1664525, self.N_M) != 1:
+            print(f'{self.N_M = }, {math.gcd(1664525, self.N_M) = }')
+            raise ValueError('gcd(1664525, self.N_M) should be 1.')
         if self.num_of_each_type * self.num_types != self.N:
             print(f'{self.N = }, {self.num_of_each_type = }, {self.num_types = }')
             raise ValueError("value of num_of_each_type is wrong")
-        self.a = np.uint32(abc[0])
-        self.b = np.uint32(abc[1])
-        self.c = np.uint32(abc[2])
-        self.abc = self.a, self.b, self.c
-        self.Mabc = self.num_types, self.a, self.b, self.c
         self.seed = seed
-
-        # Check if interaction matrix can be computed correctly
-        self.N_M = int(self.M) * (int(self.M) - 1) // 2
-        if math.gcd(self.N_M, self.a) != 1:
-            print(f'Warning: {self.M = }, {self.N_M = }, {self.a = }, {math.gcd(self.N_M, self.a) = } (should be 1)')
-            raise ValueError("The gcd(N_M, a) is not 1.")
-
-        # Check for possible overflow of np.int32
-        test_0 = int(self.a) * (self.N_M - 1) + int(self.b)
-        test_1 = test_0 % int(self.N_M)
-        max_value = np.iinfo(np.uint64).max
-        if test_0 > max_value:
-            print(f'Warning: {np.iinfo(np.int64).max = }, {test_0 = }, {test_1 = }')
-            raise OverflowError("Try to change abc to avoid overflow")
-        converted_test_0 = np.uint64(test_0)  # Also raise error
-        converted_test_1 = np.uint64(test_1)
 
         # Setup Lattice
         self.lattice = np.array([[t] * num_of_each_type for t in range(self.num_types)], dtype=np.int32).flatten()
@@ -65,14 +49,11 @@ class Randium_2d_gpu:
         self.steps = []
         self.wallclock_times = []
 
-
     def __repr__(self):
         out = f'Randium(threads_per_block=({self.threads_per_block[0]}, {self.threads_per_block[1]}), '
         out += f'blocks=({self.blocks[0]}, {self.blocks[1]}), '
         out += f'tiles=({self.tiles[0]}, {self.tiles[1]}), '
-        out += f'num_of_each_type={self.num_of_each_type}, '
-        out += f'abc=({int(self.a)}, {int(self.b)}, {int(self.c)})'
-        out += ')'
+        out += f'num_of_each_type={self.num_of_each_type})'
         return out
 
     def __str__(self):
@@ -82,14 +63,21 @@ class Randium_2d_gpu:
         out += f'  Unique type pairs: {int(self.N_M)}'
         return out
 
+    def run_global(self, beta=1.0, steps=1):
+        self.lattice = backend.h_global_mc(self.lattice, self.M, beta, steps)
+
+    def run_global_cache(self, beta=1.0, steps=1):
+        self.lattice = backend.c_global_mc(self.lattice, self.M, beta, steps)
+
+
     def run(self, beta=1.0, steps=1):
-        start = cuda.event()
-        end = cuda.event()
+        start = numba.cuda.event()
+        end = numba.cuda.event()
 
         start.record()
-        kernel_run_simulation[self.blocks, self.threads_per_block](
+        backend.kernel_run_simulation[self.blocks, self.threads_per_block](
             self.d_lattice,
-            *self.Mabc,
+            self.M,
             beta,
             self.tiles,
             self.rng_states,
@@ -97,13 +85,17 @@ class Randium_2d_gpu:
         )
         end.record()
         end.synchronize()
+        wallclock_time = start.elapsed_time(end)
+
         self.lattice = self.d_lattice.copy_to_host()
 
-        wallclock_time = start.elapsed_time(end)
         self.wallclock_times.append(wallclock_time)
         self.steps.append(steps)
 
         return wallclock_time
+
+    def energy(self):
+        return backend.h_lattice_energy(self.lattice, self.M)/self.N
 
     def get_benchmark(self):
         first_delta_t = self.wallclock_times[0]
@@ -111,29 +103,45 @@ class Randium_2d_gpu:
         mc_attempts_per_step = self.rows * self.cols * 4
         steps_avg = np.mean(self.steps[1:])
         return dict(
-            first_delta_t = float(first_delta_t),
-            delta_t_avg = float(delta_t_avg),
-            mc_attempts_per_step = int(mc_attempts_per_step),
-            steps_avg = int(steps_avg),
-            mc_attempts_per_sec = float(steps_avg*mc_attempts_per_step/delta_t_avg),
+            first_delta_t=float(first_delta_t),  # in ms
+            delta_t_avg=float(delta_t_avg),  # in ms
+            mc_attempts_per_step=int(mc_attempts_per_step),
+            steps_avg=int(steps_avg),
+            mc_attempts_per_sec=float(steps_avg * mc_attempts_per_step / (delta_t_avg/1000)),
         )
 
+    def meta_info(self):
+        return dict(
+            rows=int(self.rows),
+            cols=int(self.cols),
+            N=int(self.N),
+            M=int(self.M),
+            N_m=int(self.N_m),
+            N_M=int(self.N_M),
+            threads_per_block=(int(self.threads_per_block[0]), int(self.threads_per_block[1])),
+            blocks=(int(self.blocks[0]), int(self.blocks[1])),
+            tiles=(int(self.tiles[0]), int(self.tiles[1])),
+            energy=self.energy(),
+            **self.get_benchmark(),
+            lattice=[int(self.lattice[x, y]) for x, y in product(range(self.cols), range(self.rows))]
+        )
 
+    def get_shuffle_indexes(self, x_range, y_range):
+        dx = x_range[1] - x_range[0]
+        dy = y_range[1] - y_range[0]
 
-def main():
-    randium = Randium_2d_gpu()
-    print(randium)
-    print(randium.lattice)
-    print(f'Compile in {randium.run(1)} ms')
-    steps_per_time_block = 16
-    for time_block in range(16):
-        wc = randium.run(beta = 1.0, steps = steps_per_time_block)
-        print(f'{time_block:<4} {wc:2.2f}')
-    print(randium.lattice)
-    from pprint import pprint
-    pprint(randium.get_benchmark())
-    print(f'MC attempts per secound: {randium.get_benchmark()['mc_attempts_per_sec']:0.2e}')
+        I = np.array([
+            backend.h_get_shuffle_idx(x, y, self.M)
+            for x, y in product(range(x_range[0], x_range[1]), range(y_range[0], y_range[1]))
+        ]).reshape((dx, dy))
+        return I
 
+    def get_interaction_matrix(self, x_range, y_range):
+        dx = x_range[1] - x_range[0]
+        dy = y_range[1] - y_range[0]
 
-if __name__ == '__main__':
-    main()
+        I = np.array([
+            backend.h_get_pair_energy(x, y, self.M)
+            for x, y in product(range(x_range[0], x_range[1]), range(y_range[0], y_range[1]))
+        ]).reshape((dx, dy))
+        return I
