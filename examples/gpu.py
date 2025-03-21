@@ -3,8 +3,9 @@ import randium_2d_gpu as rd2
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 def main():
-    #randium = Randium_2d_gpu(threads_per_block=(8, 8), blocks=(16, 16), tiles=(8, 8), num_of_each_type=16384)
+    # randium = Randium_2d_gpu(threads_per_block=(8, 8), blocks=(16, 16), tiles=(8, 8), num_of_each_type=16384)
     rdm = rd2.Randium_2d_gpu()
     print(rdm)
     beta = 2.0
@@ -26,12 +27,11 @@ def main():
     plt.figure()
     plt.hist(U_upper, bins=64, density=True, alpha=0.75)
     xs = np.linspace(-5, 5, 128)
-    plt.plot(xs, np.exp(-0.5*xs*xs)/(2*np.pi)**0.5)
+    plt.plot(xs, np.exp(-0.5 * xs * xs) / (2 * np.pi) ** 0.5)
     plt.yscale('log')
     plt.show()
 
-    I_idx = rdm.get_shuffle_indexes((0, i_max), (0, i_max))
-    print(f'{len(set(I_idx.flatten())) - 1 = } should be {i_max*(i_max-1)//2 = } if shuffling is a bijection')
+    print(f'{I[0,0] = }, {I[1,1] = }, {I[0,1] = }, {I[1,0] = }, {I[1,2] = }, {I[2,1] = }')
 
     print(rdm.lattice)
     print(f'Compile in {rdm.run(1)} ms')

@@ -1,13 +1,13 @@
 import math
 import numpy as np
 import numba
-from numba import cuda
 
 import functools
 
 from numba.cuda.random import create_xoroshiro128p_states
 from numba.cuda.random import xoroshiro128p_uniform_float32
 from numba import cuda, uint32, uint64
+
 
 def inverf(x):
     """ S. Winitzki’s (2008)
@@ -52,65 +52,9 @@ def get_shuffle_idx_ulf(type0, type1, num_types):
     # 5**2 * 139 * 479 = 166452, Note: gcd(1664525, N_M) should be one
     for _ in range(8):
         idx = np.uint64((1664525 * idx + 1013904223) % N_M)  # Shuffle index
-        #idx = np.uint64((7919 * idx + 123456) % N_M)  # Shuffle index
+        # idx = np.uint64((7919 * idx + 123456) % N_M)  # Shuffle index
     return np.uint32(idx)
 
-
-
-
-def get_shuffle_idx_wang(type0, type1, num_types):
-    """
-    Returns a shuffled index in a strictly upper triangular matrix using an improved hash.
-
-    Parameters:
-      type0 (uint32): First type index.
-      type1 (uint32): Second type index.
-      num_types (uint32): Total number of types.
-
-    Returns:
-      uint32: A shuffled index corresponding to the (type0, type1) pair when type0 != type1.
-              Returns 0xFFFFFFFF as a marker if type0 equals type1.
-
-    This device function computes the linear index into the strictly upper triangular
-    part of a matrix and then scrambles it using a variant of Wang’s 32-bit integer hash.
-
-    N.B this algorithm does not preserve the number of pairs
-    """
-    # Handle the special diagonal case.
-    if type0 == type1:
-        return uint32(0xFFFFFFFF)  # Marker for diagonal elements
-
-    # Cast parameters to 64-bit to prevent overflow
-    M = uint64(num_types)
-    # Ensure that i < j for a strictly upper triangular matrix.
-    if type0 < type1:
-        i = uint64(type0)
-        j = uint64(type1)
-    else:
-        i = uint64(type1)
-        j = uint64(type0)
-
-    # Compute linear index for the strictly upper triangular matrix.
-    # The formula below maps the (i, j) pair to an index in [0, N_M-1],
-    # where N_M = M * (M - 1) // 2 is the number of unique (i, j) pairs.
-    idx = i * (M - 1) - i * (i - 1) // 2 + (j - i - 1)
-    N_M = M * (M - 1) // 2  # Total number of unique indexes
-
-    # Linear congruential generator (LCG) pre-shuffle avoid (0, 1) is mapped to 0
-    # idx = (idx*1664525+1013904223)%N_M
-
-    # Apply a mixing function (Wang’s 32-bit hash variant)
-    idx = (~idx) + (idx << 15)
-    idx = idx ^ (idx >> 12)
-    idx = idx + (idx << 2)
-    idx = idx ^ (idx >> 4)
-    idx = idx * uint64(2057)
-    idx = idx ^ (idx >> 16)
-
-    # Map back into the valid range [0, N_M)
-    idx = idx % N_M
-
-    return uint32(idx)
 
 get_shuffle_idx = get_shuffle_idx_ulf
 h_get_shuffle_idx = numba.jit(get_shuffle_idx)  # Host function
@@ -118,7 +62,7 @@ d_get_shuffle_idx = cuda.jit(device=True)(get_shuffle_idx)  # Device function
 
 
 @numba.njit
-def h_get_pair_energy(type0, type1, num_types):
+def h_get_pair_energy_ulf(type0, type1, num_types):
     """ Host function: Return energy of the pair of types i and j. """
     M = num_types
     if type0 == type1:  # Handle special diagonal
@@ -126,12 +70,12 @@ def h_get_pair_energy(type0, type1, num_types):
     idx_shuffle = h_get_shuffle_idx(type0, type1, num_types)
     N_M = M * (M - 1) // 2
     x_k = (2 * idx_shuffle + 1) / N_M - 1  # -1 < x_k < +1
-    energy = math.sqrt(2.0)*h_inverf(x_k)
+    energy = math.sqrt(2.0) * h_inverf(x_k)
     return energy
 
 
 @cuda.jit(device=True)
-def d_get_pair_energy(type0, type1, num_types):
+def d_get_pair_energy_ulf(type0, type1, num_types):
     """ Device function: Return energy of the pair of types i and j. """
     one = np.float32(1.0)
     two = np.float32(2.0)
@@ -141,8 +85,88 @@ def d_get_pair_energy(type0, type1, num_types):
     idx_shuffle = d_get_shuffle_idx(type0, type1, num_types)
     N_M = M * (M - 1) // 2
     x_k = (two * idx_shuffle + one) / N_M - one  # -1 < x_k < +1
-    energy = d_inverf(x_k)
+    energy = math.sqrt(2.0) * d_inverf(x_k)
     return energy
+
+
+def get_random_i32_wang(idx):
+    """ Return random integer using Wang’s 32-bit hash variant """
+    idx = np.uint32(idx)
+
+    # Mixing function, Wang’s 32-bit hash variant
+    idx = (~idx) + (idx << 15)
+    idx = idx ^ (idx >> 12)
+    idx = idx + (idx << 2)
+    idx = idx ^ (idx >> 4)
+    idx = idx * uint64(2057)
+    idx = idx ^ (idx >> 16)
+
+    return uint32(idx)
+
+
+h_get_random_i32_wang = numba.jit(get_random_i32_wang)  # Host function
+d_get_random_i32_wang = cuda.jit(device=True)(get_random_i32_wang)  # Device function
+
+
+def get_pair_energy(type0, type1, num_types):
+    """ Return energy of the pair of types i and j. """
+
+    if type0 == type1:  # Handle special diagonal
+        return np.float32(np.inf)
+
+    # Get unique pair index
+    i = np.uint64(min(type0, type1))  # j > i
+    j = np.uint64(max(type0, type1))
+    M = uint64(num_types)
+    idx = np.uint32(i * (M - 1) - i * (i - 1) // 2 + (j - i - 1))  # Index in Strictly Upper Triangular Matrix
+
+    random_i32 = get_random_i32_wang(idx)
+    if random_i32 == 0:  # Handle edge case of 0 (probability 2**-32 ~ 2e-10)
+        random_i32 = 1
+
+    return np.float32(math.sqrt(2.0) * inverf(2.0 * random_i32 / 2 ** 32 - 1.0))
+
+
+@numba.njit
+def h_get_pair_energy(type0, type1, num_types):
+    """ Host function: Return energy of the pair of types i and j. """
+
+    if type0 == type1:  # Handle special diagonal
+        return np.float32(np.inf)
+
+    # Get unique pair index
+    i = np.uint64(min(type0, type1))  # j > i
+    j = np.uint64(max(type0, type1))
+    M = uint64(num_types)
+    idx = np.uint32(i * (M - 1) - i * (i - 1) // 2 + (j - i - 1))  # Index in Strictly Upper Triangular Matrix
+
+    random_i32 = h_get_random_i32_wang(idx)
+    if random_i32 == 0:  # Handle edge case of 0 (probability 2**-32 ~ 2e-10)
+        random_i32 = 1
+
+    return math.sqrt(2.0) * h_inverf(2.0 * random_i32 / 2 ** 32 - 1.0)
+
+
+@cuda.jit(device=True)
+def d_get_pair_energy(type0, type1, num_types):
+    """ Device function: Return energy of the pair of types i and j. """
+
+    if type0 == type1:  # Handle special diagonal
+        return np.float32(np.inf)
+
+    # Get unique pair index
+    i = np.uint64(min(type0, type1))  # j > i
+    j = np.uint64(max(type0, type1))
+    M = uint64(num_types)
+    idx = np.uint32(i * (M - 1) - i * (i - 1) // 2 + (j - i - 1))  # Index in Strictly Upper Triangular Matrix
+
+    random_i32 = d_get_random_i32_wang(idx)
+    if random_i32 == 0:  # Handle edge case of 0 (probability 2**-32 ~ 2e-10)
+        random_i32 = 1
+
+    two = np.float32(2.0)
+    one = np.float32(1.0)
+    return math.sqrt(2.0) * d_inverf(two * random_i32 / 2 ** 32 - one)
 
 
 @numba.njit
@@ -158,6 +182,7 @@ def h_get_particle_energy(lattice, num_types, xx, yy):
         energy += h_get_pair_energy(this_type, that_type, num_types)
     return energy
 
+
 @cuda.jit(device=True)
 def d_get_particle_energy(lattice, num_types, xx, yy):
     """ Device function: Return energy of the particle located at (xx, yy) in lattice. """
@@ -171,6 +196,7 @@ def d_get_particle_energy(lattice, num_types, xx, yy):
         energy += d_get_pair_energy(this_type, that_type, num_types)
     return energy
 
+
 @numba.njit(parallel=True)
 def h_lattice_energy(lattice, num_types):
     rows, columns = lattice.shape
@@ -179,6 +205,7 @@ def h_lattice_energy(lattice, num_types):
         for yy in range(0, columns):
             energy += h_get_particle_energy(lattice, num_types, xx, yy)
     return energy
+
 
 @numba.njit
 def h_global_mc(lattice, num_types, beta=1.0, steps_per_particle=1):
@@ -198,16 +225,18 @@ def h_global_mc(lattice, num_types, beta=1.0, steps_per_particle=1):
                 u2_new = h_get_particle_energy(lattice, num_types, xx2, yy2)
                 delta = u2_new + u1_new - (u2_old + u1_old)
                 rnd = np.random.random()
-                if rnd < np.exp(-beta*delta):
+                if rnd < np.exp(-beta * delta):
                     pass  # Accept move
                 else:
                     lattice[xx1, yy1] = t1
                     lattice[xx2, yy2] = t2
     return lattice
 
+
 @functools.lru_cache(maxsize=1024)
 def c_get_pair_energy(type0, type1, num_types):
     return h_get_pair_energy(type0, type1, num_types)
+
 
 def c_get_particle_energy(lattice, num_types, xx, yy):
     rows, columns = lattice.shape
@@ -219,6 +248,7 @@ def c_get_particle_energy(lattice, num_types, xx, yy):
         that_type = lattice[xx1, yy1]
         energy += c_get_pair_energy(this_type, that_type, num_types)
     return energy
+
 
 def c_global_mc(lattice, num_types, beta=1.0, steps_per_particle=1):
     rows, columns = lattice.shape
@@ -237,7 +267,7 @@ def c_global_mc(lattice, num_types, beta=1.0, steps_per_particle=1):
                 u2_new = c_get_particle_energy(lattice, num_types, xx2, yy2)
                 delta = u2_new + u1_new - (u2_old + u1_old)
                 rnd = np.random.random()
-                if rnd < np.exp(-beta*delta):
+                if rnd < np.exp(-beta * delta):
                     pass  # Accept move
                 else:
                     lattice[xx1, yy1] = t1
@@ -340,5 +370,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
