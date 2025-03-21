@@ -16,7 +16,7 @@ wc = rdm.run()  # Compile
 print(f'Compile (local GPU): {wc} ms')
 wc = rdm.run(beta=beta, steps=128)
 print(f'Equilibrate (local): {wc} ms')
-print(f'MC attempts per second (GPU): {rdm.get_benchmark()['mc_attempts_per_sec']:0.2e}')
+print(f"MC attempts per second (GPU): {rdm.get_benchmark()['mc_attempts_per_sec']:0.2e}")
 tic = perf_counter()
 rdm.run_global(beta=beta)  # Compile
 toc = perf_counter()
@@ -28,7 +28,7 @@ toc = perf_counter()
 print(f'Equilibrate (global): {(toc - tic) * 1000} ms')
 mc_attempts_per_sec = rdm.N * steps / (toc - tic)
 print(f'MC attempts per second (global CPU): {mc_attempts_per_sec:0.2e}')
-print(f'Speed-up: {rdm.get_benchmark()['mc_attempts_per_sec'] / mc_attempts_per_sec}')
+print(f'Speed-up: {rdm.get_benchmark()["mc_attempts_per_sec"] / mc_attempts_per_sec}')
 wc = rdm.run(beta=beta, steps=512)
 print(f'Equilibrate (local, extra): {wc} ms')
 
@@ -42,11 +42,14 @@ for _ in range(4):
 time_blocks = 4
 block_energies = []
 block_times = []
-inner_steps = [int(1.3 ** x) for x in range(1, 20)]
+inner_steps = [int(1.3 ** x) for x in range(1, 10)]
 print(f'{inner_steps = }')
 overlap_table = []
+store_lattices = []
 for _ in range(time_blocks):
+    this_store_lattices = []
     lat_ref = rdm.lattice.copy()
+    this_store_lattices.append(lat_ref)
     time = 0
     times = []
     this_overlaps = []
@@ -60,7 +63,9 @@ for _ in range(time_blocks):
         print(f'{time = }, {overlap = :.3} {energy = :.3}')
         block_energies.append(energy)
         block_times.append(time)
+        this_store_lattices.append(rdm.lattice)
     overlap_table.append(this_overlaps)
+    store_lattices.append(this_store_lattices)
 
 plt.figure()
 plt.plot(block_times, block_energies, '-')
@@ -89,3 +94,8 @@ toml.dump(dict(
     times=[int(x) for x in times],
     overlaps=[float(x) for x in overlaps],
 ), open(f'data/local_{rdm.rows}x{rdm.cols}M{rdm.M}beta{beta:.4f}.toml', 'w'))
+
+# Save trajectory
+store_lattices = np.array(store_lattices, dtype=np.int32)
+print(store_lattices)
+

@@ -9,105 +9,6 @@ from numba.cuda.random import xoroshiro128p_uniform_float32
 from numba import cuda, uint32, uint64
 
 
-def inverf(x):
-    """ S. Winitzki’s (2008)
-    A handy approximation for the error function and its inverse
-    Lecture Notes in Computer Science series, volume 2667
-    https://link.springer.com/chapter/10.1007/3-540-44839-X_82
-    See also: Approximations to inverse error functions, Stephen Dyer
-    See also: https://www.mimirgames.com/articles/programming/approximations-of-the-inverse-error-function/
-    See also: https://www.scribd.com/document/82414963/Winitzki-Approximation-to-Error-Function
-    """
-    one = np.float32(1.0)
-    two = np.float32(2.0)
-    one_half = np.float32(0.5)
-    a = np.float32(0.147)  # 0.1400122886866665
-    s = math.copysign(one, x)
-    xx = one - x * x
-    log_xx = math.log(xx)
-    t = two / (math.pi * a) + one_half * log_xx
-    inner = t * t - (one / a) * log_xx
-    result = s * math.sqrt(math.sqrt(inner) - t)  # Eq. (7) in "A handy approximation ..."
-    return result
-
-
-h_inverf = numba.jit(inverf)  # Host function
-d_inverf = cuda.jit(device=True)(inverf)  # Device function
-
-
-def get_shuffle_idx_ulf(type0, type1, num_types):
-    """ Return a shuffled index in a Strictly Upper Triangular Matrix.
-    Note: Ensure that gcd(a, N_M) = 1 where N_M = M * (M - 1) // 2 and M is num_types.
-     """
-    if type0 == type1:  # Handle special diagonal
-        return np.uint32(np.nan)
-
-    # Parameters, N.B. be aware of integer overflow (see error by making 'a' large)
-    M = np.uint64(num_types)
-
-    i = np.uint64(min(type0, type1))  # j > i
-    j = np.uint64(max(type0, type1))
-    idx = np.uint64(i * (M - 1) - i * (i - 1) // 2 + (j - i - 1))  # Index in Strictly Upper Triangular Matrix
-    N_M = np.uint64(M * (M - 1) // 2)  # Number of unique indexes
-    # 5**2 * 139 * 479 = 166452, Note: gcd(1664525, N_M) should be one
-    for _ in range(8):
-        idx = np.uint64((1664525 * idx + 1013904223) % N_M)  # Shuffle index
-        # idx = np.uint64((7919 * idx + 123456) % N_M)  # Shuffle index
-    return np.uint32(idx)
-
-
-get_shuffle_idx = get_shuffle_idx_ulf
-h_get_shuffle_idx = numba.jit(get_shuffle_idx)  # Host function
-d_get_shuffle_idx = cuda.jit(device=True)(get_shuffle_idx)  # Device function
-
-
-@numba.njit
-def h_get_pair_energy_ulf(type0, type1, num_types):
-    """ Host function: Return energy of the pair of types i and j. """
-    M = num_types
-    if type0 == type1:  # Handle special diagonal
-        return np.float32(np.inf)
-    idx_shuffle = h_get_shuffle_idx(type0, type1, num_types)
-    N_M = M * (M - 1) // 2
-    x_k = (2 * idx_shuffle + 1) / N_M - 1  # -1 < x_k < +1
-    energy = math.sqrt(2.0) * h_inverf(x_k)
-    return energy
-
-
-@cuda.jit(device=True)
-def d_get_pair_energy_ulf(type0, type1, num_types):
-    """ Device function: Return energy of the pair of types i and j. """
-    one = np.float32(1.0)
-    two = np.float32(2.0)
-    M = num_types
-    if type0 == type1:  # Handle special diagonal
-        return np.float32(np.inf)
-    idx_shuffle = d_get_shuffle_idx(type0, type1, num_types)
-    N_M = M * (M - 1) // 2
-    x_k = (two * idx_shuffle + one) / N_M - one  # -1 < x_k < +1
-    energy = math.sqrt(2.0) * d_inverf(x_k)
-    return energy
-
-
-def get_random_i32_wang(idx):
-    """ Return random integer using Wang’s 32-bit hash variant """
-    idx = np.uint32(idx)
-
-    # Mixing function, Wang’s 32-bit hash variant
-    idx = (~idx) + (idx << 15)
-    idx = idx ^ (idx >> 12)
-    idx = idx + (idx << 2)
-    idx = idx ^ (idx >> 4)
-    idx = idx * uint64(2057)
-    idx = idx ^ (idx >> 16)
-
-    return uint32(idx)
-
-
-h_get_random_i32_wang = numba.jit(get_random_i32_wang)  # Host function
-d_get_random_i32_wang = cuda.jit(device=True)(get_random_i32_wang)  # Device function
-
-
 def get_pair_energy(type0, type1, num_types):
     """ Return energy of the pair of types i and j. """
 
@@ -117,56 +18,47 @@ def get_pair_energy(type0, type1, num_types):
     # Get unique pair index
     i = np.uint64(min(type0, type1))  # j > i
     j = np.uint64(max(type0, type1))
-    M = uint64(num_types)
-    idx = np.uint32(i * (M - 1) - i * (i - 1) // 2 + (j - i - 1))  # Index in Strictly Upper Triangular Matrix
 
-    random_i32 = get_random_i32_wang(idx)
-    if random_i32 == 0:  # Handle edge case of 0 (probability 2**-32 ~ 2e-10)
-        random_i32 = 1
+    # Apply symmetric hash mixing
+    a = (227*997*i+7654321) ^ (887*409*j)
+    b = (227*997*j+7654321) ^ (887*409*i)
+    idx = a ^ b
+    idx &= 0xFFFFFFFF
 
-    return np.float32(math.sqrt(2.0) * inverf(2.0 * random_i32 / 2 ** 32 - 1.0))
+    # Mixing function, Wang’s 32-bit hash variant
+    idx = (~idx) + (idx << 15)
+    idx = idx ^ (idx >> 12)
+    idx = idx + (idx << 2)
+    idx = idx ^ (idx >> 4)
+    idx = idx * uint64(2057)
+    idx = idx ^ (idx >> 16)
+    idx &= 0xFFFFFFFF  # to 32bit
 
-
-@numba.njit
-def h_get_pair_energy(type0, type1, num_types):
-    """ Host function: Return energy of the pair of types i and j. """
-
-    if type0 == type1:  # Handle special diagonal
-        return np.float32(np.inf)
-
-    # Get unique pair index
-    i = np.uint64(min(type0, type1))  # j > i
-    j = np.uint64(max(type0, type1))
-    M = uint64(num_types)
-    idx = np.uint32(i * (M - 1) - i * (i - 1) // 2 + (j - i - 1))  # Index in Strictly Upper Triangular Matrix
-
-    random_i32 = h_get_random_i32_wang(idx)
-    if random_i32 == 0:  # Handle edge case of 0 (probability 2**-32 ~ 2e-10)
-        random_i32 = 1
-
-    return math.sqrt(2.0) * h_inverf(2.0 * random_i32 / 2 ** 32 - 1.0)
-
-
-@cuda.jit(device=True)
-def d_get_pair_energy(type0, type1, num_types):
-    """ Device function: Return energy of the pair of types i and j. """
-
-    if type0 == type1:  # Handle special diagonal
-        return np.float32(np.inf)
-
-    # Get unique pair index
-    i = np.uint64(min(type0, type1))  # j > i
-    j = np.uint64(max(type0, type1))
-    M = uint64(num_types)
-    idx = np.uint32(i * (M - 1) - i * (i - 1) // 2 + (j - i - 1))  # Index in Strictly Upper Triangular Matrix
-
-    random_i32 = d_get_random_i32_wang(idx)
-    if random_i32 == 0:  # Handle edge case of 0 (probability 2**-32 ~ 2e-10)
-        random_i32 = 1
-
-    two = np.float32(2.0)
+    # Convert to random float32
     one = np.float32(1.0)
-    return math.sqrt(2.0) * d_inverf(two * random_i32 / 2 ** 32 - one)
+    two = np.float32(2.0)
+    x = np.float32(two * np.float32(idx+1) / np.float32(2**32) - one)  # x e (0.0, 1.0)
+
+    # Edge cases of f32 founding off errors  (avoid infinity when taking logarithm)
+    if x <= np.float32(-1.0): x = np.float32(-0.99999994)
+    if x >= np.float32( 1.0): x = np.float32( 0.99999994)
+
+    # S. Winitzki’s (2008), A handy approximation for the error function and its inverse
+    # Lecture Notes in Computer Science series, volume 2667
+    # https://www.mimirgames.com/articles/programming/approximations-of-the-inverse-error-function
+    one_half = np.float32(0.5)
+    a = np.float32(0.147)  # 0.1400122886866665
+    s = math.copysign(one, x)
+    xx = one - x * x
+    log_xx = math.log(xx)
+    t = two / (math.pi * a) + one_half * log_xx
+    inner = t * t - (one / a) * log_xx
+    inverf = s * math.sqrt(math.sqrt(inner) - t)  # Eq. (7) in "A handy approximation ..."
+
+    return np.float32(math.sqrt(2.0) * inverf)
+
+h_get_pair_energy = numba.jit(get_pair_energy)
+d_get_pair_energy = cuda.jit(device=True)(get_pair_energy)
 
 
 @numba.njit

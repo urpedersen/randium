@@ -11,7 +11,7 @@ def main():
     beta = 2.0
 
     # Plot (part of) interaction matrix
-    i_max = 512
+    i_max = 1024
     I = rdm.get_interaction_matrix((0, i_max), (0, i_max))
     plt.figure()
     plt.title(f'Upper corner of {rdm.M}×{rdm.M} interaction matrix')
@@ -43,7 +43,7 @@ def main():
     print(rdm.lattice)
     from pprint import pprint
     pprint(rdm.get_benchmark())
-    print(f'MC attempts per second: {rdm.get_benchmark()['mc_attempts_per_sec']:0.2e}')
+    print(f"MC attempts per second: {rdm.get_benchmark()['mc_attempts_per_sec']:0.2e}")
 
 
 if __name__ == '__main__':
