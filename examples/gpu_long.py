@@ -8,7 +8,7 @@ import randium_2d_gpu as rd2
 import toml
 
 beta = 1.0
-rdm = rd2.Randium_2d_gpu(threads_per_block=(8, 8), blocks=(16, 16), tiles=(6, 6), num_of_each_type=16)
+rdm = rd2.Randium_2d_gpu(threads_per_block=(8, 8), blocks=(16, 16), tiles=(6, 6), num_of_each_type=1)
 print(rdm)
 
 lat_ref = rdm.lattice.copy()

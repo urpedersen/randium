@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 
 def main():
     # randium = Randium_2d_gpu(threads_per_block=(8, 8), blocks=(16, 16), tiles=(8, 8), num_of_each_type=16384)
-    rdm = rd2.Randium_2d_gpu()
+    rdm = rd2.Randium_2d_gpu(threads_per_block=(8, 8), blocks=(16, 16), tiles=(8, 8), num_of_each_type=1)
+    #rdm = rd2.Randium_2d_gpu()
     print(rdm)
     beta = 2.0
 

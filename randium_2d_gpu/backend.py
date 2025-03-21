@@ -9,19 +9,19 @@ from numba.cuda.random import xoroshiro128p_uniform_float32
 from numba import cuda, uint32, uint64
 
 
-def get_pair_energy(type0, type1, num_types):
+def get_pair_energy_v1(type0, type1, num_types):
     """ Return energy of the pair of types i and j. """
 
     if type0 == type1:  # Handle special diagonal
         return np.float32(np.inf)
 
     # Get unique pair index
-    i = np.uint64(min(type0, type1))  # j > i
-    j = np.uint64(max(type0, type1))
+    i = np.uint64(type0)
+    j = np.uint64(type1)
 
     # Apply symmetric hash mixing
-    a = (227*997*i+7654321) ^ (887*409*j)
-    b = (227*997*j+7654321) ^ (887*409*i)
+    a = (227 * 997 * i + 7654321) ^ (887 * 409 * j)
+    b = (227 * 997 * j + 7654321) ^ (887 * 409 * i)
     idx = a ^ b
     idx &= 0xFFFFFFFF
 
@@ -37,11 +37,11 @@ def get_pair_energy(type0, type1, num_types):
     # Convert to random float32
     one = np.float32(1.0)
     two = np.float32(2.0)
-    x = np.float32(two * np.float32(idx+1) / np.float32(2**32) - one)  # x e (0.0, 1.0)
+    x = np.float32(two * np.float32(idx + 1) / np.float32(2 ** 32) - one)  # x e (0.0, 1.0)
 
     # Edge cases of f32 founding off errors  (avoid infinity when taking logarithm)
     if x <= np.float32(-1.0): x = np.float32(-0.99999994)
-    if x >= np.float32( 1.0): x = np.float32( 0.99999994)
+    if x >= np.float32(1.0): x = np.float32(0.99999994)
 
     # S. Winitzki’s (2008), A handy approximation for the error function and its inverse
     # Lecture Notes in Computer Science series, volume 2667
@@ -57,6 +57,58 @@ def get_pair_energy(type0, type1, num_types):
 
     return np.float32(math.sqrt(2.0) * inverf)
 
+
+def get_pair_energy_v2(type0, type1, num_types):
+    if type0 == type1:  # Handle special diagonal
+        return np.float32(np.inf)
+
+    zero = np.float32(0.0)
+    one_half = np.float32(0.5)
+    one = np.float32(1.0)
+    two = np.float32(2.0)
+    minus_two = np.float32(-2.0)
+
+    # Get unique pair index
+    i = np.uint64(max(type0, type1))
+    j = np.uint64(min(type0, type1))
+    a = np.uint64(859 * 947 * 953 * i + j)
+    b = np.uint64(863 * 877 * 967 * j + i)
+    a &= 0xFFFFFFFF
+    b &= 0xFFFFFFFF
+
+    in_unit_circle = False
+    while ~in_unit_circle:
+        a = (~a) + (a << 15)  # Mixing function, Wang’s 32-bit hash variant
+        a = a ^ (a >> 12)
+        a = a + (a << 2)
+        a = a ^ (a >> 4)
+        a = a * uint64(2057)
+        a = a ^ (a >> 16)
+        a &= 0xFFFFFFFF
+
+        b = (~b) + (b << 15)
+        b = b ^ (b >> 12)
+        b = b + (b << 2)
+        b = b ^ (b >> 4)
+        b = b * uint64(2057)
+        b = b ^ (b >> 16)
+        b &= 0xFFFFFFFF
+
+        x = a / 2 ** 32
+        y = b / 2 ** 32
+        x -= one_half
+        y -= one_half
+        x *= two
+        y *= two
+        r2 = x * x + y * y
+        if r2 < one:
+            # print(x, y, r2)
+            in_unit_circle = True
+
+    return np.float32(x * math.sqrt(minus_two * math.log(r2) / r2))
+
+
+get_pair_energy = get_pair_energy_v1  # v1 is four times faster than v2
 h_get_pair_energy = numba.jit(get_pair_energy)
 d_get_pair_energy = cuda.jit(device=True)(get_pair_energy)
 

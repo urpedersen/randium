@@ -13,26 +13,17 @@ class Randium_2d_gpu:
             threads_per_block=(8, 8),
             blocks=(16, 16),
             tiles=(8, 8),
-            num_of_each_type=64,
-            seed=2025
+            num_of_each_type=64
     ):
-        self.threads_per_block = np.uint32(threads_per_block[0]), np.uint32(threads_per_block[1])
-        self.blocks = np.uint32(blocks[0]), np.uint32(blocks[1])
-        self.tiles = np.uint32(tiles[0]), np.uint32(tiles[1])
+        self.threads_per_block = threads_per_block
+        self.blocks =blocks
+        self.tiles = tiles
         self.rows = tiles[0] * blocks[0] * threads_per_block[0]
         self.cols = tiles[1] * blocks[1] * threads_per_block[1]
         self.N = self.rows * self.cols
-        self.num_of_each_type = self.N_m = np.uint32(num_of_each_type)
-        self.num_types = self.M = np.uint32(self.N // self.num_of_each_type)
+        self.num_of_each_type = self.N_m = num_of_each_type
+        self.num_types = self.M = self.N // self.num_of_each_type
         self.N_M = self.M * (self.M - 1) // 2
-        # 5**2 * 139 * 479 = 1664525
-        if math.gcd(1664525, self.N_M) != 1:
-            print(f'{self.N_M = }, {math.gcd(1664525, self.N_M) = }')
-            raise ValueError('gcd(1664525, self.N_M) should be 1.')
-        if self.num_of_each_type * self.num_types != self.N:
-            print(f'{self.N = }, {self.num_of_each_type = }, {self.num_types = }')
-            raise ValueError("value of num_of_each_type is wrong")
-        self.seed = seed
 
         # Setup Lattice
         self.lattice = np.array([[t] * num_of_each_type for t in range(self.num_types)], dtype=np.int32).flatten()
