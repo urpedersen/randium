@@ -147,7 +147,7 @@ def h_lattice_energy(lattice, num_types):
     energy = 0.0
     for xx in numba.prange(0, rows):
         for yy in range(0, columns):
-            energy += h_get_particle_energy(lattice, num_types, xx, yy)
+            energy += 0.5*h_get_particle_energy(lattice, num_types, xx, yy)
     return energy
 
 

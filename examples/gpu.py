@@ -43,8 +43,8 @@ def main():
         print(f'{time_block:<4} {wc:2.2f}')
     print(rdm.lattice)
     from pprint import pprint
-    pprint(rdm.get_benchmark())
-    print(f"MC attempts per second: {rdm.get_benchmark()['mc_attempts_per_sec']:0.2e}")
+    pprint(rdm.benchmark())
+    print(f"MC attempts per second: {rdm.benchmark()['mc_attempts_per_sec']:0.2e}")
 
 
 if __name__ == '__main__':

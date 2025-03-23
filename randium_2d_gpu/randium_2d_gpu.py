@@ -88,7 +88,7 @@ class Randium_2d_gpu:
     def energy(self):
         return backend.h_lattice_energy(self.lattice, self.M)/self.N
 
-    def get_benchmark(self):
+    def benchmark(self):
         first_delta_t = self.wallclock_times[0]
         delta_t_avg = np.mean(self.wallclock_times[1:])
         mc_attempts_per_step = self.rows * self.cols * 4
@@ -113,8 +113,7 @@ class Randium_2d_gpu:
             blocks=(int(self.blocks[0]), int(self.blocks[1])),
             tiles=(int(self.tiles[0]), int(self.tiles[1])),
             energy=self.energy(),
-            **self.get_benchmark(),
-            lattice=[int(self.lattice[x, y]) for x, y in product(range(self.cols), range(self.rows))]
+            **self.benchmark(),
         )
 
     def get_shuffle_indexes(self, x_range, y_range):
