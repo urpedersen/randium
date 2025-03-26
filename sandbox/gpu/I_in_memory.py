@@ -74,6 +74,9 @@ def kernel_run_simulation(lattice, interactions, num_types, beta, tiles, rng_sta
             grid.sync()
 
 def main():
+    device = cuda.get_current_device()
+    print(f"Device name: {device.name.decode('utf-8')}")
+
     threads_per_block = (8, 8)
     blocks = (16, 16)
     tiles = (5, 5)
@@ -82,11 +85,14 @@ def main():
     cols = tiles[1] * blocks[1] * threads_per_block[1]
     N = rows * cols
 
-    num_of_each_type = N_m = 512//4
+    num_of_each_type = N_m = 128  # 16
     num_types = M = N // num_of_each_type
     num_unique_pairs = N_M = M*(M-1)//2
     print(f'{rows}x{cols} = {N}, {num_of_each_type = }, {num_types = }, {num_unique_pairs = }')
     assert M*num_of_each_type == N
+
+    n_threads = np.prod(list(threads_per_block + blocks))
+    print(f'n_threads = {n_threads}')
 
     # Setup Lattice
     lattice = np.array([[t] * num_of_each_type for t in range(num_types)], dtype=np.int32).flatten()
@@ -98,7 +104,7 @@ def main():
     interactions = np.array(np.random.randn(N_M), dtype=np.float32)
     d_interactions = cuda.to_device(interactions)
 
-    print(f'Memory usage for interactions: {interactions.nbytes} bytes = {interactions.nbytes/1e6:.1f} Mb')
+    print(f'Memory usage for interactions: {interactions.nbytes} bytes = {interactions.nbytes/1e3:.1f} KB = {interactions.nbytes/1e6:.1f} MB = {interactions.nbytes/1e9:.1f} GB')
 
     # Setup random number generator
     tile_size = tiles[0] * tiles[1]
@@ -111,7 +117,7 @@ def main():
 
     # Run simulation
     beta = 1.0
-    steps_per_timeblock = 128
+    steps_per_timeblock = 64
     mc_steps = 4 * N * steps_per_timeblock
     for _ in range(8):
         start.record()
