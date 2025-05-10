@@ -78,14 +78,14 @@ def main():
     print(f"Device name: {device.name.decode('utf-8')}")
 
     threads_per_block = (8, 8)
-    blocks = (16, 16)
-    tiles = (5, 5)
+    blocks = (12, 12)
+    tiles = (4, 4)
 
     rows = tiles[0] * blocks[0] * threads_per_block[0]
     cols = tiles[1] * blocks[1] * threads_per_block[1]
     N = rows * cols
 
-    num_of_each_type = N_m = 128  # 16
+    num_of_each_type = N_m = 12*4  # 16
     num_types = M = N // num_of_each_type
     num_unique_pairs = N_M = M*(M-1)//2
     print(f'{rows}x{cols} = {N}, {num_of_each_type = }, {num_types = }, {num_unique_pairs = }')

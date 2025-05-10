@@ -8,9 +8,16 @@ import randium_2d_gpu as rd2
 
 import toml
 
-beta = 1.35
-rdm = rd2.Randium_2d_gpu(threads_per_block=(8, 8), blocks=(16, 16), tiles=(6, 6), num_of_each_type=1)
+from numba import cuda
+
+device = cuda.get_current_device()
+print(f"Device name: {device.name.decode('utf-8')}")
+
+beta = 1.20
+rdm = rd2.Randium_2d_gpu(threads_per_block=(4, 4), blocks=(12, 12), tiles=(4, 4), num_of_each_type=1)
 print(rdm)
+num_threads = int(np.prod(rdm.threads_per_block + rdm.blocks))
+print(f'{num_threads = }')
 
 lat_ref = rdm.lattice.copy()
 wc = rdm.run()  # Compile
@@ -23,7 +30,7 @@ rdm.run_global(beta=beta)  # Compile
 toc = perf_counter()
 print(f'Compile (global CPU): {(toc - tic) * 1000} ms')
 
-steps = 16*2048
+steps = 16
 tic = perf_counter()
 rdm.run_global(beta=beta, steps=steps)
 toc = perf_counter()
@@ -32,7 +39,7 @@ mc_attempts_per_sec = rdm.N * steps / (toc - tic)
 print(f'MC attempts per second (global CPU): {mc_attempts_per_sec:0.2e}')
 print(f'Speed-up: {rdm.benchmark()["mc_attempts_per_sec"] / mc_attempts_per_sec}')
 
-steps = 128*2048
+steps = 2048*8
 mc_attempts = steps*rdm.N*4
 run_est = mc_attempts/rdm.benchmark()["mc_attempts_per_sec"]
 print(f'Estimated equbriliation runtime: {run_est:0.1f} s = {run_est / 60:0.1f} minutes ')
@@ -50,7 +57,7 @@ for _ in range(4):
 time_blocks = 16
 block_energies = []
 block_times = []
-inner_steps = [int(1.4 ** x) for x in range(1, 35)]  #
+inner_steps = [int(1.4 ** x) for x in range(1, 22)]  #
 print(f'{inner_steps = }')
 overlap_table = []
 store_lattices = []
