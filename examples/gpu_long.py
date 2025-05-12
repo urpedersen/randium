@@ -1,4 +1,5 @@
 from itertools import product
+import time
 from time import perf_counter
 
 import numpy as np
@@ -10,10 +11,13 @@ import toml
 
 from numba import cuda
 
+# print current time
+print("Current time =", time.ctime())
+
 device = cuda.get_current_device()
 print(f"Device name: {device.name.decode('utf-8')}")
 
-beta = 1.20
+beta = 1.60
 rdm = rd2.Randium_2d_gpu(threads_per_block=(4, 4), blocks=(12, 12), tiles=(4, 4), num_of_each_type=1)
 print(rdm)
 num_threads = int(np.prod(rdm.threads_per_block + rdm.blocks))
@@ -39,7 +43,7 @@ mc_attempts_per_sec = rdm.N * steps / (toc - tic)
 print(f'MC attempts per second (global CPU): {mc_attempts_per_sec:0.2e}')
 print(f'Speed-up: {rdm.benchmark()["mc_attempts_per_sec"] / mc_attempts_per_sec}')
 
-steps = 2048*8
+steps = 2048*128*16
 mc_attempts = steps*rdm.N*4
 run_est = mc_attempts/rdm.benchmark()["mc_attempts_per_sec"]
 print(f'Estimated equbriliation runtime: {run_est:0.1f} s = {run_est / 60:0.1f} minutes ')
@@ -57,7 +61,7 @@ for _ in range(4):
 time_blocks = 16
 block_energies = []
 block_times = []
-inner_steps = [int(1.4 ** x) for x in range(1, 22)]  #
+inner_steps = [int(1.4 ** x) for x in range(1, 42)]
 print(f'{inner_steps = }')
 overlap_table = []
 store_lattices = []
@@ -110,6 +114,7 @@ plt.show()
 # Save overlap to data folder
 toml.dump(dict(
     **rdm.meta_info(),
+    beta=beta,
     times=[int(x) for x in times],
     overlaps=[float(x) for x in overlaps],
     energies=[float(x) for x in block_energies]
