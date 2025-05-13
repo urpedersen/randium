@@ -54,6 +54,10 @@ class Randium_2d_gpu:
         out += f'  Unique type pairs: {int(self.N_M)}'
         return out
 
+    def set_lattice(self, lattice):
+        self.lattice = lattice
+        self.d_lattice = numba.cuda.to_device(lattice)
+
     def run_global(self, beta=1.0, steps=1):
         self.lattice = backend.h_global_mc(self.lattice, self.M, beta, steps)
 
