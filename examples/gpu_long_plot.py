@@ -30,17 +30,19 @@ plt.title(f'Randium on a {L}x{L} lattice ' r'($N_m=1$)')
 t_halfs = []
 for idx, beta in enumerate(betas):
     fname=f'local_{L}x{L}M36864beta{beta:.4f}'
-    print(fname)
+    #print(fname)
     lattice = np.load(f'data/{fname}.npy')
     data = toml.load(f'data/{fname}.toml')
-    print(data.keys())
+    #print(data.keys())
     t = data['times']
     Q = data['overlaps']
     beta = float(fname.split('beta')[-1])
+    #mask = (0.2 < Q) & (Q < 0.8)
     popt, pcov = curve_fit(stretch_exponential, t, Q, p0=p0)
     t_half = popt[1]*np.log(2*popt[0])**(1/popt[2])
+    print(f'{beta},{t_half}')
     t_halfs.append(t_half)
-    print(t_half, popt)
+    #print(t_half, popt)
     #plt.plot([t_half], [0.5], 'kx', color=cm(idx/6))
     p0 = popt
     plt.plot(t_fit, stretch_exponential(t_fit, *popt), 'k--')

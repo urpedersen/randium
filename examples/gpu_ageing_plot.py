@@ -8,7 +8,7 @@ cm = mpl.colormaps['jet_r']
 
 plt.figure()
 
-for beta_old in 1.0, 1.1, 1.5, 1.6:
+for beta_old in 1.0, 1.1, 1.2, 1.4, 1.5, 1.6:
     color_idx = (beta_old-0.8)/0.8
     color = cm(color_idx)
     print(f'{beta_old = }, {color_idx = }')
@@ -39,11 +39,12 @@ for beta_old in 1.0, 1.1, 1.5, 1.6:
     plt.plot(t_fit, shifted_stretch_exponential(t_fit, *popt), '--', color=color)
 
 plt.text(1e6, -2.55, r'$\beta_f=1.3$', color='k', fontsize=14)
-plt.text(1e5, -2.9, r'Fits: $A\,\exp(-(t/\tau)^\gamma)-2\beta_f$', color='k')
+plt.text(4e4, -3.1, r'Fits: $A\,\exp(-(t/\tau)^\gamma)-2\beta_f$', color='k', fontsize=12)
 plt.xlabel(r'Time, $t$ [swap attempts per particle]')
 plt.ylabel(r'Energy, $u=E/N$')
 plt.xscale('log')
 plt.xlim(1, 1e8)
 plt.ylim(-3.2, -1.8)
 plt.legend(frameon=False, fontsize='10')
+plt.savefig('figures/ageing.png', dpi=300)
 plt.show()

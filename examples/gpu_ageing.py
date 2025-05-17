@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 import randium_2d_gpu as rd2
 
-beta_old = 1.20
+beta_old = 1.40
 beta_new = 1.30
 plt.figure()
 plt.title(f'Ageing from {beta_old} to {beta_new}')

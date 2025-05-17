@@ -30,7 +30,7 @@ def get_neighbours(L, D):
                 neighbor_idx += 1
     return neighbors
 
-def get_interactions(M):
+def get_interactions_old(M):
     from scipy.special import erfinv
     I = np.zeros((M, M))
     np.fill_diagonal(I, np.inf)
@@ -48,6 +48,14 @@ def get_interactions(M):
             I[i, j] = val
             I[j, i] = val
             idx += 1
+    return I
+
+def get_interactions(M):
+    """ Create a symmetric interaction matrix """
+    I = np.random.randn(M, M)
+    I = np.triu(I, k=1)
+    I += I.T
+    np.fill_diagonal(I, np.inf)
     return I
 
 @numba.njit
@@ -246,6 +254,10 @@ def default_lattice():
 def main():
     import matplotlib.pyplot as plt
     import time
+
+    # Example of Interaction matrix
+    print(get_interactions(4))
+
     # lat = default_lattice()
     lat = Lattice(
         L=16,
