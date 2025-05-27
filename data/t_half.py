@@ -11,7 +11,6 @@ t_0 = math.log(2)/2
 log_t_halfs = np.log(t_halfs/t_0)
 mask = betas > 1.2
 
-
 def fit_func(x, J):
     a = 10
     x_0 = 0.7

@@ -89,6 +89,33 @@ class Randium_2d_gpu:
 
         return wallclock_time
 
+    def run_cpu(self, beta=1.0, steps=1):
+        raise NotImplementedError
+        for step in range(steps):
+            this = np.random.randint(0, self.rows), np.random.randint(0, self.cols)
+            this_type = self.lattice[this[0], this[1]]
+            direction = np.random.randint(1)
+            dx = np.random.randint(-1, 2)  # -1 or 1
+            that = this[0], this[1]
+            that[direction] = that[direction]+dx
+            that[0] %= self.rows
+            that[1] %= self.cols
+            that_type = self.lattice[that[0], that[1]]
+            u_this_old = backend.h_get_particle_energy(self.lattice, self.M, this[0], this[1])
+            u_that_old = backend.h_get_particle_energy(self.lattice, self.M, that[0], that[1])
+            self.lattice[this[0], this[1]] = that_type
+            self.lattice[that[0], that[1]] = this_type
+            u_this_new = backend.h_get_particle_energy(self.lattice, self.M, this[0], this[1])
+            u_that_new = backend.h_get_particle_energy(self.lattice, self.M, that[0], that[1])
+            delta = (u_this_new + u_that_new) - (u_this_old + u_that_old)
+            rnd = np.random.rand()
+            if rnd < math.exp(-beta * delta):
+                pass  # Accept move
+            else:
+                self.lattice[this[0], this[1]] = this_type
+                self.lattice[that[0], that[1]] = that_type
+        return ...
+
     def energy(self):
         return backend.h_lattice_energy(self.lattice, self.M)/self.N
 
