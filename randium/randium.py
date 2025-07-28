@@ -233,7 +233,7 @@ class Lattice:
         if self.D != other.D or self.N != other.N or self.M != other.M:
             raise ValueError('Error: Trying to compute overlap of lattices that are not the same kind')
         overlap_counter = 0
-        overlaps = np.zeros(self.N, dtype=np.bool)
+        overlaps = np.zeros(self.N, dtype=bool)
         for n in range(self.N):
             if self.types[n] == other.types[n]:
                 overlap_counter += 1
